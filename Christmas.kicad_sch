@@ -5,9 +5,10 @@
   (paper "A5")
 
   (title_block
-    (title "Christmas light")
-    (date "2023-12-05")
+    (title "Christmas PCB tree")
+    (date "2023-12-06")
     (rev "V0.2")
+    (comment 1 "Casper Tak")
   )
 
   (lib_symbols

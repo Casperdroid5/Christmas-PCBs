@@ -56,7 +56,11 @@
           "width": 0.0
         }
       ],
-      "drc_exclusions": [],
+      "drc_exclusions": [
+        "courtyards_overlap|120940001|67438001|8a6bcb8f-e0c1-4115-8c9a-c87978d6cc8b|32c5f75c-08fd-4de2-acd6-c1071fdd5b88",
+        "footprint_type_mismatch|114554000|87376000|32c5f75c-08fd-4de2-acd6-c1071fdd5b88|00000000-0000-0000-0000-000000000000",
+        "solder_mask_bridge|104394000|95504000|755cfa14-df95-49b1-b2e6-3cad1a979b06|a8aaac83-10e8-4506-b336-65a0b20e094e"
+      ],
       "meta": {
         "version": 2
       },

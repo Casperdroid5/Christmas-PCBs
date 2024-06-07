@@ -1,3 +1,10 @@
+/*
+  Arduino Christmas Songs
+  
+  Based on a project and code by Dipto Pratyaksa, updated on 31/3/13
+  Modified for Christmas by Joshi, on Dec 17th, 2017.
+*/
+
 // Include necessary libraries
 #include <Adafruit_NeoPixel.h>
 #include <avr/power.h>
@@ -47,6 +54,11 @@ bool buttonPressed = false;
 
 // Timing variables for non-blocking pattern display
 unsigned long previousMillis = 0;
+unsigned long noteStartTime = 0;
+unsigned long noteDuration = 0;
+int currentNote = 0;
+bool playing = false;
+bool ledsSet = false;
 
 void setup()
 {
@@ -61,26 +73,19 @@ void setup()
 
 void displayRandomPattern()
 {
-    unsigned long currentMillis = millis();
-
-    if (currentMillis - previousMillis >= DELAYVAL)
+    pixels.clear();
+    for (int i = 0; i < NUMPIXELS; i++)
     {
-        previousMillis = currentMillis;
-
-        pixels.clear();
-        for (int i = 0; i < NUMPIXELS; i++)
+        if (random(2) == 0)
         {
-            if (random(2) == 0)
-            {
-                pixels.setPixelColor(i, pixels.Color(150, 0, 0)); // Random red
-            }
-            else
-            {
-                pixels.setPixelColor(i, pixels.Color(0, 150, 0)); // Random green
-            }
+            pixels.setPixelColor(i, pixels.Color(150, 0, 0)); // Random red
         }
-        pixels.show();
+        else
+        {
+            pixels.setPixelColor(i, pixels.Color(0, 150, 0)); // Random green
+        }
     }
+    pixels.show();
 }
 
 void buzz(int targetPin, long frequency, long length)
@@ -97,47 +102,35 @@ void buzz(int targetPin, long frequency, long length)
     }
 }
 
-void sing(int *melody, int *tempo, int size)
+void playNote(int *melody, int *tempo, int noteIndex)
 {
-    // Play notes of the selected song
-    for (int thisNote = 0; thisNote < size; thisNote++)
-    {
-        int noteDuration = 1000 / (tempo[thisNote] * songSpeed);
-        buzz(melodyPin, melody[thisNote], noteDuration);
-        int pauseBetweenNotes = noteDuration * 1.30;
-        delay(pauseBetweenNotes);
-        buzz(melodyPin, 0, noteDuration);
-    }
+    int frequency = melody[noteIndex];
+    noteDuration = 1000 / (tempo[noteIndex] * songSpeed);
+    buzz(melodyPin, frequency, noteDuration);
+    noteStartTime = millis();
+    playing = true;
 }
 
 void playNextSong()
 {
-    // Play the current song
-    if (currentSong == 0)
-    {
-        sing(melody, tempo, sizeof(melody) / sizeof(int));
-    }
-    else if (currentSong == 1)
-    {
-        sing(wish_melody, wish_tempo, sizeof(wish_melody) / sizeof(int));
-    }
-    else if (currentSong == 2)
-    {
-        sing(santa_melody, santa_tempo, sizeof(santa_melody) / sizeof(int));
-    }
-
-    // Move to the next song
-    currentSong = (currentSong + 1) % 3;
+    currentNote = 0;
+    noteStartTime = 0;
+    noteDuration = 0;
+    playing = false;
 }
 
 void loop()
 {
+    unsigned long currentMillis = millis();
+
     // Check if the button is pressed
     if (digitalRead(buttonPin) == LOW)
     {
         if (!buttonPressed)
         {
             buttonPressed = true;
+            displayRandomPattern();
+            ledsSet = true;
             playNextSong();
         }
     }
@@ -146,6 +139,53 @@ void loop()
         buttonPressed = false;
     }
 
-    // Display random NeoPixel pattern
-    displayRandomPattern();
+    // Play the current song
+    if (playing)
+    {
+        if (currentMillis - noteStartTime >= noteDuration)
+        {
+            currentNote++;
+            if (currentSong == 0 && currentNote < sizeof(melody) / sizeof(int))
+            {
+                playNote(melody, tempo, currentNote);
+            }
+            else if (currentSong == 1 && currentNote < sizeof(wish_melody) / sizeof(int))
+            {
+                playNote(wish_melody, wish_tempo, currentNote);
+            }
+            else if (currentSong == 2 && currentNote < sizeof(santa_melody) / sizeof(int))
+            {
+                playNote(santa_melody, santa_tempo, currentNote);
+            }
+            else
+            {
+                playing = false;
+                currentSong = (currentSong + 1) % 3;
+            }
+        }
+    }
+    else
+    {
+        if (buttonPressed)
+        {
+            if (currentSong == 0)
+            {
+                playNote(melody, tempo, currentNote);
+            }
+            else if (currentSong == 1)
+            {
+                playNote(wish_melody, wish_tempo, currentNote);
+            }
+            else if (currentSong == 2)
+            {
+                playNote(santa_melody, santa_tempo, currentNote);
+            }
+        }
+    }
+
+    // Prevent further updates to the LEDs once set
+    if (!ledsSet)
+    {
+        displayRandomPattern();
+    }
 }

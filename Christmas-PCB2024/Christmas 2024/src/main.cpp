@@ -23,10 +23,9 @@
 Adafruit_NeoPixel pixels(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
 
 // Timing and brightness
-#define DELAYVAL 500 // Delay in milliseconds between patterns
-int brightness = 150; // Set brightness level (0 to 255)
+#define DELAYVAL 500 // Delay in milliseconds between lighting patterns
+int brightness = 10; // Set brightness level (0 to 255)
 int songSpeed = 2; // Adjust song speed (1 = normal, >1 = faster, <1 = slower)
-int volume = 10; // Volume control (0 to 255)
 
 // Christmas melodies and tempos
 int melody[] = {
@@ -56,6 +55,7 @@ int santa_tempo[] = {
 
 // Current song index
 int currentSong = 0;
+bool buttonPressed = false;
 
 void setup() {
   // Initialize NeoPixel
@@ -66,6 +66,7 @@ void setup() {
   // Initialize pins for buzzer and button
   pinMode(melodyPin, OUTPUT);
   pinMode(buttonPin, INPUT_PULLUP); // Button with pull-up resistor
+
 
   // Trinket-specific setup
 #if defined(__AVR_ATtiny85__) && (F_CPU == 16000000)
@@ -87,16 +88,15 @@ void displayRandomPattern() {
 }
 
 void buzz(int targetPin, long frequency, long length) {
-  digitalWrite(13, HIGH);
-  long delayValue = 1000000 / frequency / 2;
-  long numCycles = frequency * length / 1000;
+  long delayValue = 1000000 / frequency / 2; // calculate the delay value between transitions
+  long numCycles = frequency * length / 1000; // calculate the number of cycles for proper timing
+  
   for (long i = 0; i < numCycles; i++) {
     digitalWrite(targetPin, HIGH);
     delayMicroseconds(delayValue);
     digitalWrite(targetPin, LOW);
     delayMicroseconds(delayValue);
   }
-  digitalWrite(13, LOW);
 }
 
 void sing(int *melody, int *tempo, int size) {
@@ -127,8 +127,13 @@ void playNextSong() {
 void loop() {
   // Check if the button is pressed
   if (digitalRead(buttonPin) == LOW) {
-    playNextSong();
-    delay(1000); // Debounce delay
+    if (!buttonPressed) {
+      buttonPressed = true;
+      playNextSong();
+      
+    }
+  } else {
+    buttonPressed = false;
   }
 
   // Display random NeoPixel pattern

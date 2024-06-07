@@ -23,7 +23,7 @@ Adafruit_NeoPixel pixels(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
 
 #define DELAYVAL 500 // Time (in milliseconds) to pause between patterns
 
-int brightness = 10; // Initial brightness level (0 to 255)
+int brightness = 10; // Set brightness level (0 to 255)
 
 void setup() {
   // These lines are specifically to support the Adafruit Trinket 5V 16 MHz.
@@ -39,23 +39,16 @@ void setup() {
 }
 
 void loop() {
-  for(int j=0; j<3; j++) { // Display 3 different random patterns
-    pixels.clear(); // Set all pixel colors to 'off'
-    for(int i=0; i<NUMPIXELS; i++) { // For each pixel...
-      if (random(2) == 0) {
-        pixels.setPixelColor(i, pixels.Color(150, 0, 0)); // Random red
-      } else {
-        pixels.setPixelColor(i, pixels.Color(0, 150, 0)); // Random green
-      }
+  pixels.clear(); // Set all pixel colors to 'off'
+  
+  for(int i=0; i<NUMPIXELS; i++) { // For each pixel...
+    if (random(2) == 0) {
+      pixels.setPixelColor(i, pixels.Color(150, 0, 0)); // Random red
+    } else {
+      pixels.setPixelColor(i, pixels.Color(0, 150, 0)); // Random green
     }
-    pixels.show(); // Send the updated pixel colors to the hardware.
-    delay(DELAYVAL); // Pause before next pattern
   }
-
-  // Adjust brightness
-  brightness = brightness + 50;
-  if (brightness > 255) {
-    brightness = 50; // Reset brightness if it exceeds maximum
-  }
-  pixels.setBrightness(brightness); // Apply new brightness level
+  
+  pixels.show(); // Send the updated pixel colors to the hardware.
+  delay(DELAYVAL); // Pause before next pattern
 }

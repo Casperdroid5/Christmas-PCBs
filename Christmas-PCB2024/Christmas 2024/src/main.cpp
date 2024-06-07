@@ -1,14 +1,7 @@
-/*
-  Arduino Christmas Songs
-  
-  Based on a project and code by Dipto Pratyaksa, updated on 31/3/13
-  Modified for Christmas by Joshi, on Dec 17th, 2017.
-*/
-
 // Include necessary libraries
 #include <Adafruit_NeoPixel.h>
 #ifdef __AVR__
-  #include <avr/power.h> // Required for 16 MHz Adafruit Trinket
+  #include <avr/power.h> 
 #endif
 
 #include "pitches.h"
@@ -18,13 +11,13 @@
 #define melodyPin PB0 // Buzzer pin
 #define buttonPin PB2 // Button pin
 
-// NeoPixel configuration
-#define NUMPIXELS 7 // Number of NeoPixels
+// LED configuration
+#define NUMPIXELS 7 // Number of RGB leds
 Adafruit_NeoPixel pixels(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
 
-// Timing and brightness
-#define DELAYVAL 500 // Delay in milliseconds between lighting patterns
-int brightness = 10; // Set brightness level (0 to 255)
+// Timing and brightness settings
+#define DELAYVAL 500 // Delay in milliseconds between RGB lighting patterns
+int brightness = 10; // Set RGB-LED brightness level (0 to 255)
 int songSpeed = 2; // Adjust song speed (1 = normal, >1 = faster, <1 = slower)
 
 // Christmas melodies and tempos
@@ -54,37 +47,44 @@ int santa_tempo[] = {
 };
 
 // Current song index
-int currentSong = 0;
+int currentSong = 0; // 0 = Jingle Bells, 1 = We Wish You a Merry Christmas, 2 = Santa Claus is Coming to Town
+
+// Button state
 bool buttonPressed = false;
 
+// Timing variables for non-blocking pattern display
+unsigned long previousMillis = 0;
+
 void setup() {
-  // Initialize NeoPixel
   pixels.begin();
   pixels.setBrightness(brightness);
-  randomSeed(analogRead(0));
+  randomSeed(analogRead(0)); // Seed the random number generator for LED light patterns
   
   // Initialize pins for buzzer and button
   pinMode(melodyPin, OUTPUT);
-  pinMode(buttonPin, INPUT_PULLUP); // Button with pull-up resistor
+  pinMode(buttonPin, INPUT_PULLUP);
 
-
-  // Trinket-specific setup
 #if defined(__AVR_ATtiny85__) && (F_CPU == 16000000)
   clock_prescale_set(clock_div_1);
 #endif
 }
 
 void displayRandomPattern() {
-  pixels.clear();
-  for (int i = 0; i < NUMPIXELS; i++) {
-    if (random(2) == 0) {
-      pixels.setPixelColor(i, pixels.Color(150, 0, 0)); // Random red
-    } else {
-      pixels.setPixelColor(i, pixels.Color(0, 150, 0)); // Random green
+  unsigned long currentMillis = millis();
+  
+  if (currentMillis - previousMillis >= DELAYVAL) {
+    previousMillis = currentMillis;
+    
+    pixels.clear();
+    for (int i = 0; i < NUMPIXELS; i++) {
+      if (random(2) == 0) {
+        pixels.setPixelColor(i, pixels.Color(150, 0, 0)); // Random red
+      } else {
+        pixels.setPixelColor(i, pixels.Color(0, 150, 0)); // Random green
+      }
     }
+    pixels.show();
   }
-  pixels.show();
-  delay(DELAYVAL);
 }
 
 void buzz(int targetPin, long frequency, long length) {
@@ -130,7 +130,6 @@ void loop() {
     if (!buttonPressed) {
       buttonPressed = true;
       playNextSong();
-      
     }
   } else {
     buttonPressed = false;

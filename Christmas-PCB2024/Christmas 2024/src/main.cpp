@@ -1,191 +1,119 @@
-/*
-  Arduino Christmas Songs
-  
-  Based on a project and code by Dipto Pratyaksa, updated on 31/3/13
-  Modified for Christmas by Joshi, on Dec 17th, 2017.
-*/
+#define F_CPU 9600000 // Must stay at this speed
 
-// Include necessary libraries
-#include <Adafruit_NeoPixel.h>
-#include <avr/power.h>
-#include "pitches.h"
+#include <avr/io.h>
+#include <util/delay.h>
+#include <avr/interrupt.h>
+#include "light_ws2812.c"
+#include <Arduino.h>
 
-// Pin definitions
-#define PIN PB1       // NeoPixel pin
-#define melodyPin PB0 // Buzzer pin
-#define buttonPin PB2 // Button pin
-#define F_CPU == 16000000 // Set the CPU frequency to 16 MHz
+#define NUM_LEDS 11 //number of ws2812 leds
+#define HALF_LEDS ((NUM_LEDS + 1) / 2)
+#define STRIP_LENGTH (41 - HALF_LEDS)
+#define BRIGHT_POT A3
+#define SPEED_POT A2
+#define BUTTON 0
+#define OFF 0
+#define ON 1
+#define ONCE 5
 
-// LED configuration
-#define NUMPIXELS 7 // Number of RGB leds
-Adafruit_NeoPixel pixels(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
+// Function Prototypes
+void SetSpeed();
+void SetBrightness();
+bool CheckReleased();
+bool CheckButton();
+void CreateEye(int8_t center);
+void SendLeds(uint8_t eye);
+void setPixelColor(uint8_t pix, cRGB color);
 
-// Timing and brightness settings
-#define DELAYVAL 500 // Delay in milliseconds between RGB lighting patterns
-int brightness = 10; // Set RGB-LED brightness level (0 to 255)
-int songSpeed = 2;   // Adjust song speed (1 = normal, >1 = faster, <1 = slower)
+cRGB p[NUM_LEDS];
+cRGB black[1] ;
+uint16_t brightness;
+uint8_t mode = ON;
+bool pressed = false;
+int8_t eye = 0;
+int8_t inc = 1;
+uint16_t moment;
+uint8_t spd;
 
-// Christmas melodies and tempos
-int melody[] = {
-    NOTE_E5, NOTE_E5, NOTE_E5, NOTE_E5, NOTE_E5, NOTE_E5, NOTE_E5, NOTE_G5, NOTE_C5, NOTE_D5,
-    NOTE_E5, NOTE_F5, NOTE_F5, NOTE_F5, NOTE_F5, NOTE_F5, NOTE_E5, NOTE_E5, NOTE_E5, NOTE_E5,
-    NOTE_E5, NOTE_D5, NOTE_D5, NOTE_E5, NOTE_D5, NOTE_G5};
-int tempo[] = {8, 8, 4, 8, 8, 4, 8, 8, 8, 8, 2, 8, 8, 8, 8, 8, 8, 16, 16, 8, 8, 8, 8, 4, 4};
-
-int wish_melody[] = {
-    NOTE_B3, NOTE_F4, NOTE_F4, NOTE_G4, NOTE_F4, NOTE_E4, NOTE_D4, NOTE_D4, NOTE_D4, NOTE_G4,
-    NOTE_G4, NOTE_A4, NOTE_G4, NOTE_F4, NOTE_E4, NOTE_E4, NOTE_E4, NOTE_A4, NOTE_A4, NOTE_B4,
-    NOTE_A4, NOTE_G4, NOTE_F4, NOTE_D4, NOTE_B3, NOTE_B3, NOTE_D4, NOTE_G4, NOTE_E4, NOTE_F4};
-int wish_tempo[] = {
-    4, 4, 8, 8, 8, 8, 4, 4, 4, 4, 8, 8, 8, 8, 4, 4, 4, 4, 8, 8, 8, 8, 4, 4, 8, 8, 4, 4, 4, 2};
-
-int santa_melody[] = {
-    NOTE_G4, NOTE_E4, NOTE_F4, NOTE_G4, NOTE_G4, NOTE_G4, NOTE_A4, NOTE_B4, NOTE_C5, NOTE_C5,
-    NOTE_C5, NOTE_E4, NOTE_F4, NOTE_G4, NOTE_G4, NOTE_G4, NOTE_A4, NOTE_G4, NOTE_F4, NOTE_F4,
-    NOTE_E4, NOTE_G4, NOTE_C4, NOTE_E4, NOTE_D4, NOTE_F4, NOTE_B3, NOTE_C4};
-int santa_tempo[] = {
-    8, 8, 8, 4, 4, 4, 8, 8, 4, 4, 4, 8, 8, 4, 4, 4, 8, 8, 4, 2, 4, 4, 4, 4, 4, 2, 4, 1};
-
-// Current song index
-int currentSong = 0; // 0 = Jingle Bells, 1 = We Wish You a Merry Christmas, 2 = Santa Claus is Coming to Town
-
-// Button state
-bool buttonPressed = false;
-
-// Timing variables for non-blocking pattern display
-unsigned long previousMillis = 0;
-unsigned long noteStartTime = 0;
-unsigned long noteDuration = 0;
-int currentNote = 0;
-bool playing = false;
-bool ledsSet = false;
-
-void setup()
-{
-    pixels.begin();
-    pixels.setBrightness(brightness);
-    randomSeed(analogRead(0)); // Seed the random number generator for LED light patterns
-
-    // Initialize pins for buzzer and button
-    pinMode(melodyPin, OUTPUT);
-    pinMode(buttonPin, INPUT_PULLUP);
+void setup() {
 }
 
-void displayRandomPattern()
-{
-    pixels.clear();
-    for (int i = 0; i < NUMPIXELS; i++)
-    {
-        if (random(2) == 0)
-        {
-            pixels.setPixelColor(i, pixels.Color(150, 0, 0)); // Random red
-        }
-        else
-        {
-            pixels.setPixelColor(i, pixels.Color(0, 150, 0)); // Random green
-        }
-    }
-    pixels.show();
+
+void SetSpeed() {
+  spd = 7 + (analogRead(SPEED_POT) >> 5) ;
 }
 
-void buzz(int targetPin, long frequency, long length)
-{
-    long delayValue = 1000000 / frequency / 2;  // calculate the delay value between transitions
-    long numCycles = frequency * length / 1000; // calculate the number of cycles for proper timing
-
-    for (long i = 0; i < numCycles; i++)
-    {
-        digitalWrite(targetPin, HIGH);
-        delayMicroseconds(delayValue);
-        digitalWrite(targetPin, LOW);
-        delayMicroseconds(delayValue);
-    }
+void SetBrightness() {
+  brightness = analogRead(BRIGHT_POT) >> 2;
 }
 
-void playNote(int *melody, int *tempo, int noteIndex)
-{
-    int frequency = melody[noteIndex];
-    noteDuration = 1000 / (tempo[noteIndex] * songSpeed);
-    buzz(melodyPin, frequency, noteDuration);
-    noteStartTime = millis();
-    playing = true;
+bool CheckReleased() {
+  delay(1);
+  if (digitalRead(BUTTON)) return false;
+  return true;
 }
 
-void playNextSong()
-{
-    currentNote = 0;
-    noteStartTime = 0;
-    noteDuration = 0;
-    playing = false;
+bool CheckButton() {
+  uint16_t counter = 0;
+  if (digitalRead(BUTTON)) return false;
+  while ((!digitalRead(BUTTON)) && (counter < 2000)) {
+    delay(1);
+    counter++;
+    if ((mode == ON) && (counter > 500)) {
+      mode = OFF;
+      return true;
+    }
+  }
+  if ((counter > 200) && (counter < 2000)) mode = ONCE;
+  else mode = ON;
+  moment = (uint16_t) millis();
+  eye = 0;
+  return true;
 }
 
-void loop()
-{
-    unsigned long currentMillis = millis();
+void setPixelColor(uint8_t pix, cRGB color) {
+  if (pix < NUM_LEDS) p[pix] = color;
+}
 
-    // Check if the button is pressed
-    if (digitalRead(buttonPin) == LOW)
-    {
-        if (!buttonPressed)
-        {
-            buttonPressed = true;
-            displayRandomPattern();
-            ledsSet = true;
-            playNextSong();
-        }
+void loop() {
+  SetBrightness();
+  SetSpeed();
+  if (pressed)  pressed = CheckReleased();
+  else pressed = CheckButton();
+  if ((uint16_t) millis() - moment > spd) {
+    moment = millis();
+    if (eye < HALF_LEDS) CreateEye(eye);
+    else if (STRIP_LENGTH - eye < HALF_LEDS) CreateEye(NUM_LEDS - (STRIP_LENGTH - eye));
+    else CreateEye(HALF_LEDS);
+    eye = eye + inc;
+    if (eye <= 0) {
+      inc = 1;
+      if (mode == ONCE) mode = OFF;
     }
-    else
-    {
-        buttonPressed = false;
-    }
+    if (eye >= STRIP_LENGTH) inc = -1;
+  }
+  SendLeds(eye);
+}
 
-    // Play the current song
-    if (playing)
-    {
-        if (currentMillis - noteStartTime >= noteDuration)
-        {
-            currentNote++;
-            if (currentSong == 0 && currentNote < sizeof(melody) / sizeof(int))
-            {
-                playNote(melody, tempo, currentNote);
-            }
-            else if (currentSong == 1 && currentNote < sizeof(wish_melody) / sizeof(int))
-            {
-                playNote(wish_melody, wish_tempo, currentNote);
-            }
-            else if (currentSong == 2 && currentNote < sizeof(santa_melody) / sizeof(int))
-            {
-                playNote(santa_melody, santa_tempo, currentNote);
-            }
-            else
-            {
-                playing = false;
-                currentSong = (currentSong + 1) % 3;
-            }
-        }
-    }
-    else
-    {
-        if (buttonPressed)
-        {
-            if (currentSong == 0)
-            {
-                playNote(melody, tempo, currentNote);
-            }
-            else if (currentSong == 1)
-            {
-                playNote(wish_melody, wish_tempo, currentNote);
-            }
-            else if (currentSong == 2)
-            {
-                playNote(santa_melody, santa_tempo, currentNote);
-            }
-        }
-    }
+void SendLeds(uint8_t eye) {
+  for (uint8_t i = 0; i < (STRIP_LENGTH); i++) {
+    if (i == eye) ws2812_setleds((struct cRGB *)&p, NUM_LEDS, 0);
+    ws2812_setleds((struct cRGB *)&black, 1, 0);
+  }
+  ws2812_setleds((struct cRGB *)&black, 1, 1);
+}
 
-    // Prevent further updates to the LEDs once set
-    if (!ledsSet)
-    {
-        displayRandomPattern();
-    }
+void CreateEye(int8_t center) {
+  cRGB col;
+  col.r = 0;
+  for (uint8_t i = 0; i < NUM_LEDS; i++) setPixelColor(i, col);
+  if ((!mode) || (center < 0)) return;
+  col.r = brightness;
+  for (uint8_t i = 0; i < HALF_LEDS; i++) {
+    setPixelColor(center + i, col);
+    setPixelColor(center - i, col);
+    int16_t br = col.r - (1 + brightness / 7);
+    if (br < 0) br = 0;
+    col.r = br;
+  }
 }

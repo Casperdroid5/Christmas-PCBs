@@ -10,9 +10,16 @@
 #define BASE_BRIGHTNESS 50  // Base brightness level
 
 #define LDR_SAMPLES 10
-#define DARK_THRESHOLD 1600   // Room is dark below this value
+#define DARK_THRESHOLD 1650   // Room is dark below this value
 #define MEDIUM_THRESHOLD 2200 // Room is medium lit below this value
 #define BRIGHT_THRESHOLD 3000 // Room is brightly lit at or above this value
+
+// Light status enum
+enum LightStatus {
+  LIGHT_DARK,
+  LIGHT_MEDIUM,
+  LIGHT_BRIGHT
+};
 
 int ldrReadings[LDR_SAMPLES];  // Array to store readings for moving average
 int ldrReadIndex = 0;          // Index for the current reading
@@ -21,6 +28,7 @@ bool isDark = false;           // Boolean for dark detection
 bool wasDark = false;          // Previous state
 unsigned long darkStartTime = 0; // Time when darkness was first detected
 unsigned long darkDuration = 5000; // Duration needed to trigger dark event (5 seconds)
+LightStatus currentLightStatus = LIGHT_MEDIUM; // Default light status
 
 
 // LED Mapping
@@ -242,8 +250,11 @@ void loop() {
     updateConfettiMode();
   }
 
+
+  
   FastLED.show();
 }
+
 void checkLDR() {
   unsigned long currentTime = millis();
   
@@ -263,18 +274,21 @@ void checkLDR() {
     // Calculate the average
     ldrValue = ldrTotal / LDR_SAMPLES;
     
-    // Set brightness inversely related to light level (as requested)
-    // More light = lower brightness, Less light = higher brightness
+    // Determine light status
+    LightStatus previousStatus = currentLightStatus;
+    
     if (ldrValue < DARK_THRESHOLD) {
-      // Dark room - maximum brightness
-      brightness = 255;
-    } else if (ldrValue > BRIGHT_THRESHOLD) {
-      // Bright room - minimum brightness
-      brightness = 30;
+      currentLightStatus = LIGHT_DARK;
+      brightness = 255;  // Maximum brightness in dark conditions
+    } else if (ldrValue < MEDIUM_THRESHOLD) {
+      currentLightStatus = LIGHT_MEDIUM;
+      // Linear transition from 255 to 150 between dark and medium thresholds
+      brightness = 255 - ((ldrValue - DARK_THRESHOLD) * 105 / (MEDIUM_THRESHOLD - DARK_THRESHOLD));
     } else {
-      // Linear calculation for middle range - inverted relationship
-      // As ldrValue increases, brightness decreases
-      brightness = 255 - ((ldrValue - DARK_THRESHOLD) * 225 / (BRIGHT_THRESHOLD - DARK_THRESHOLD));
+      currentLightStatus = LIGHT_BRIGHT;
+      // Linear transition from 150 to 30 between medium and bright thresholds
+      brightness = 150 - ((ldrValue - MEDIUM_THRESHOLD) * 120 / (BRIGHT_THRESHOLD - MEDIUM_THRESHOLD));
+      if (brightness < 30) brightness = 30; // Minimum brightness
     }
     
     // Apply brightness if we're not in breathe mode
@@ -283,7 +297,7 @@ void checkLDR() {
     }
     
     // Check if it's dark and track persistence
-    bool currentlyDark = (ldrValue < DARK_THRESHOLD);
+    bool currentlyDark = (currentLightStatus == LIGHT_DARK);
     
     // State change: not dark -> dark
     if (currentlyDark && !wasDark) {
@@ -303,6 +317,22 @@ void checkLDR() {
       // You can add any actions to take when darkness is detected here
     }
     
+    // Log status change if it changed
+    if (previousStatus != currentLightStatus) {
+      Serial.print("Light status changed to: ");
+      switch (currentLightStatus) {
+        case LIGHT_DARK:
+          Serial.println("DARK");
+          break;
+        case LIGHT_MEDIUM:
+          Serial.println("MEDIUM");
+          break;
+        case LIGHT_BRIGHT:
+          Serial.println("BRIGHT");
+          break;
+      }
+    }
+    
     // If in LDR_REACTIVE_MODE, update the display based on light level
     if (currentMode == LDR_REACTIVE_MODE) {
       updateLdrReactiveMode();
@@ -314,41 +344,45 @@ void checkLDR() {
     Serial.print(ldrValue);
     Serial.print(", Brightness: ");
     Serial.print(brightness);
-    Serial.print(", Dark: ");
+    Serial.print(", Status: ");
+    Serial.print(currentLightStatus == LIGHT_DARK ? "DARK" : 
+                (currentLightStatus == LIGHT_MEDIUM ? "MEDIUM" : "BRIGHT"));
+    Serial.print(", Persistent Dark: ");
     Serial.println(isDark ? "YES" : "NO");
   }
 }
 
 void updateLdrReactiveMode() {
-  // Using your specific room light thresholds
+  // Using the three status levels: DARK, MEDIUM, BRIGHT
   
-  if (isDark) {
-    // Special effect when consistent darkness is detected for the required duration
-    // Slow, dramatic pulsing with deep blue/purple hues
-    uint8_t pulseValue = sin8(millis()/20);
-    fill_solid(leds, NUM_LEDS, CHSV(200, 255, pulseValue));
-  }
-  else if (ldrValue < DARK_THRESHOLD) {  // Dark room (<1600)
-    // Slow pulsing pattern with deep blue/purple hues
-    fill_solid(leds, NUM_LEDS, CHSV(180 + (sin8(millis()/10) / 8), 255, brightness));
-  } 
-  else if (ldrValue < MEDIUM_THRESHOLD) {  // Medium lit room (<2200)
-    // Blue to teal gradient
-    for(int i = 0; i < NUM_LEDS; i++) {
-      leds[i] = CHSV(150 + (i * 30 / NUM_LEDS), 255, brightness);
-    }
-  } 
-  else if (ldrValue < BRIGHT_THRESHOLD) {  // Brighter room (<3000)
-    // Green to cyan gradient
-    for(int i = 0; i < NUM_LEDS; i++) {
-      leds[i] = CHSV(90 + (i * 30 / NUM_LEDS), 255, brightness);
-    }
-  } 
-  else {  // Very bright room (≥3000)
-    // Yellow to red vibrant colors
-    for(int i = 0; i < NUM_LEDS; i++) {
-      leds[i] = CHSV(0 + (i * 40 / NUM_LEDS), 255, brightness);
-    }
+  switch (currentLightStatus) {
+    case LIGHT_DARK:
+      if (isDark) {
+        // Special effect when persistent darkness is detected
+        // Dramatic pulsing with blue/purple hues
+        uint8_t pulseValue = sin8(millis()/20);
+        fill_solid(leds, NUM_LEDS, CHSV(200, 255, pulseValue));
+      } else {
+        // Normal dark room effect - slower pulsing blue
+        fill_solid(leds, NUM_LEDS, CHSV(180 + (sin8(millis()/10) / 8), 255, brightness));
+      }
+      break;
+      
+    case LIGHT_MEDIUM:
+      // Medium brightness effect - teal-blue gradient
+      for(int i = 0; i < NUM_LEDS; i++) {
+        // Create a nice teal-blue gradient for medium lighting
+        leds[i] = CHSV(150 + (i * 30 / NUM_LEDS), 255, brightness);
+      }
+      break;
+      
+    case LIGHT_BRIGHT:
+      // Bright room effect - vibrant colors
+      for(int i = 0; i < NUM_LEDS; i++) {
+        // Create a yellow-red-magenta gradient for bright conditions
+        leds[i] = CHSV((i * 60 / NUM_LEDS), 255, brightness);
+      }
+      break;
   }
   
   // Update the hue slowly over time for some variation
@@ -358,6 +392,7 @@ void updateLdrReactiveMode() {
   }
 }
   
+
 void checkButtons() {
   bool reading1 = digitalRead(BUTTON1);
   bool reading2 = digitalRead(BUTTON2);

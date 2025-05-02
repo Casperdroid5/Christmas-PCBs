@@ -9,6 +9,20 @@
 #define NUM_LEDS 18    // Total number of LEDs
 #define BASE_BRIGHTNESS 50  // Base brightness level
 
+#define LDR_SAMPLES 10
+#define DARK_THRESHOLD 1600   // Room is dark below this value
+#define MEDIUM_THRESHOLD 2200 // Room is medium lit below this value
+#define BRIGHT_THRESHOLD 3000 // Room is brightly lit at or above this value
+
+int ldrReadings[LDR_SAMPLES];  // Array to store readings for moving average
+int ldrReadIndex = 0;          // Index for the current reading
+int ldrTotal = 0;              // Running total of readings
+bool isDark = false;           // Boolean for dark detection
+bool wasDark = false;          // Previous state
+unsigned long darkStartTime = 0; // Time when darkness was first detected
+unsigned long darkDuration = 5000; // Duration needed to trigger dark event (5 seconds)
+
+
 // LED Mapping
 const uint8_t digit1Mapping[6] = { 0, 1, 2, 3, 4, 5 };                             // Digit '1' mapping
 const uint8_t digit2Mapping[12] = { 8, 9, 11, 10, 6, 7, 12, 13, 14, 15, 16, 17 };  // Digit '8' mapping
@@ -230,7 +244,6 @@ void loop() {
 
   FastLED.show();
 }
-
 void checkLDR() {
   unsigned long currentTime = millis();
   
@@ -238,20 +251,56 @@ void checkLDR() {
   if (currentTime - lastLdrCheck >= ldrCheckInterval) {
     lastLdrCheck = currentTime;
     
-    // Read LDR value (0-4095 for ESP32)
-    ldrValue = analogRead(LDR_PIN);
+    // Read raw LDR value (0-4095 for ESP32)
+    int rawReading = analogRead(LDR_PIN);
     
-    // Map raw LDR value to brightness range (10-255)
-    // ESP32 has 12-bit ADC (0-4095)
-    // 0.5V ≈ 625 in ADC value (0.5/3.3*4095)
-    // 3.3V = 4095 in ADC value
-    int mappedBrightness = map(ldrValue, 625, 4095, 10, 255);
-    brightness = constrain(mappedBrightness, 10, 255);
+    // Update moving average
+    ldrTotal -= ldrReadings[ldrReadIndex];  // Subtract the oldest reading
+    ldrReadings[ldrReadIndex] = rawReading; // Add the new reading
+    ldrTotal += ldrReadings[ldrReadIndex];  // Add to the total
+    ldrReadIndex = (ldrReadIndex + 1) % LDR_SAMPLES; // Advance index
     
-    // Apply new brightness if we're not in breathe mode
-    // (which controls its own brightness)
+    // Calculate the average
+    ldrValue = ldrTotal / LDR_SAMPLES;
+    
+    // Set brightness inversely related to light level (as requested)
+    // More light = lower brightness, Less light = higher brightness
+    if (ldrValue < DARK_THRESHOLD) {
+      // Dark room - maximum brightness
+      brightness = 255;
+    } else if (ldrValue > BRIGHT_THRESHOLD) {
+      // Bright room - minimum brightness
+      brightness = 30;
+    } else {
+      // Linear calculation for middle range - inverted relationship
+      // As ldrValue increases, brightness decreases
+      brightness = 255 - ((ldrValue - DARK_THRESHOLD) * 225 / (BRIGHT_THRESHOLD - DARK_THRESHOLD));
+    }
+    
+    // Apply brightness if we're not in breathe mode
     if (currentMode != BREATHE_MODE) {
       FastLED.setBrightness(brightness);
+    }
+    
+    // Check if it's dark and track persistence
+    bool currentlyDark = (ldrValue < DARK_THRESHOLD);
+    
+    // State change: not dark -> dark
+    if (currentlyDark && !wasDark) {
+      darkStartTime = currentTime;
+      wasDark = true;
+    }
+    // State change: dark -> not dark
+    else if (!currentlyDark && wasDark) {
+      wasDark = false;
+      isDark = false;
+    }
+    
+    // Check if it's been dark long enough to trigger dark event
+    if (wasDark && !isDark && (currentTime - darkStartTime > darkDuration)) {
+      isDark = true;
+      Serial.println("DARKNESS DETECTED! Triggering dark event");
+      // You can add any actions to take when darkness is detected here
     }
     
     // If in LDR_REACTIVE_MODE, update the display based on light level
@@ -259,26 +308,43 @@ void checkLDR() {
       updateLdrReactiveMode();
     }
     
-    Serial.print("LDR Value: ");
+    Serial.print("LDR Raw: ");
+    Serial.print(rawReading);
+    Serial.print(", Average: ");
     Serial.print(ldrValue);
     Serial.print(", Brightness: ");
-    Serial.println(brightness);
+    Serial.print(brightness);
+    Serial.print(", Dark: ");
+    Serial.println(isDark ? "YES" : "NO");
   }
 }
 
 void updateLdrReactiveMode() {
-  // Map light levels to different visuals
-  if (ldrValue < 1000) {  // Darker conditions
-    // Slow pulsing pattern with blue hues
-    fill_solid(leds, NUM_LEDS, CHSV(160 + (sin8(millis()/10) / 8), 255, brightness));
+  // Using your specific room light thresholds
+  
+  if (isDark) {
+    // Special effect when consistent darkness is detected for the required duration
+    // Slow, dramatic pulsing with deep blue/purple hues
+    uint8_t pulseValue = sin8(millis()/20);
+    fill_solid(leds, NUM_LEDS, CHSV(200, 255, pulseValue));
+  }
+  else if (ldrValue < DARK_THRESHOLD) {  // Dark room (<1600)
+    // Slow pulsing pattern with deep blue/purple hues
+    fill_solid(leds, NUM_LEDS, CHSV(180 + (sin8(millis()/10) / 8), 255, brightness));
   } 
-  else if (ldrValue < 2500) {  // Medium light
+  else if (ldrValue < MEDIUM_THRESHOLD) {  // Medium lit room (<2200)
+    // Blue to teal gradient
+    for(int i = 0; i < NUM_LEDS; i++) {
+      leds[i] = CHSV(150 + (i * 30 / NUM_LEDS), 255, brightness);
+    }
+  } 
+  else if (ldrValue < BRIGHT_THRESHOLD) {  // Brighter room (<3000)
     // Green to cyan gradient
     for(int i = 0; i < NUM_LEDS; i++) {
       leds[i] = CHSV(90 + (i * 30 / NUM_LEDS), 255, brightness);
     }
   } 
-  else {  // Bright light
+  else {  // Very bright room (≥3000)
     // Yellow to red vibrant colors
     for(int i = 0; i < NUM_LEDS; i++) {
       leds[i] = CHSV(0 + (i * 40 / NUM_LEDS), 255, brightness);
@@ -291,7 +357,7 @@ void updateLdrReactiveMode() {
     ldrHue++;
   }
 }
-
+  
 void checkButtons() {
   bool reading1 = digitalRead(BUTTON1);
   bool reading2 = digitalRead(BUTTON2);

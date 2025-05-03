@@ -3,10 +3,10 @@
 // Hardware Configuration
 #define RGB_PIN 3      // Data pin for LED strip
 #define BUZZER 10      // Buzzer pin
-#define BUTTON1 5      // Button 1 pin (change color)
-#define BUTTON2 4      // Button 2 pin (play song)
+#define BUTTON1 5      // Button 1 pin (play/change songs)
+#define BUTTON2 4      // Button 2 pin (change LED patterns)
 #define LDR_PIN 2      // Analog pin for LDR
-#define NUM_LEDS 18    // Total number of LEDs
+#define NUM_LEDS 6     // Total number of LEDs
 #define BASE_BRIGHTNESS 50  // Base brightness level
 
 #define LDR_SAMPLES 10
@@ -30,11 +30,6 @@ unsigned long darkStartTime = 0; // Time when darkness was first detected
 unsigned long darkDuration = 5000; // Duration needed to trigger dark event (5 seconds)
 LightStatus currentLightStatus = LIGHT_MEDIUM; // Default light status
 
-
-// LED Mapping
-const uint8_t digit1Mapping[6] = { 0, 1, 2, 3, 4, 5 };                             // Digit '1' mapping
-const uint8_t digit2Mapping[12] = { 8, 9, 11, 10, 6, 7, 12, 13, 14, 15, 16, 17 };  // Digit '8' mapping
-
 // LED Array
 CRGB leds[NUM_LEDS];
 
@@ -52,7 +47,7 @@ int brightness = BASE_BRIGHTNESS;
 unsigned long lastLdrCheck = 0;
 const unsigned long ldrCheckInterval = 500; // Check LDR every 500ms
 
-// Display Mode Enum - Adding new patterns
+// Display Mode Enum - Christmas themed patterns
 enum DisplayMode {
   STATIC_COLOR,
   RAINBOW_MODE,
@@ -61,24 +56,26 @@ enum DisplayMode {
   CHASE_MODE,
   BREATHE_MODE,
   WAVE_MODE,
+  CHRISTMAS_TWINKLE,
   OFF_MODE,
-  LDR_REACTIVE_MODE  // New mode that reacts to light levels
+  LDR_REACTIVE_MODE
 };
 
 // Current mode
 DisplayMode currentMode = STATIC_COLOR;
 
-// Color Options (Used for STATIC_COLOR mode)
+// Color Options - Modified for Christmas colors
 int currentColorIndex = 0;
 CRGB colorOptions[] = {
   CRGB::Red,
   CRGB::Green,
+  CRGB::White,
+  CRGB::Gold,    // Christmas gold
   CRGB::Blue,
   CRGB::Purple,
-  CRGB::Yellow,
-  CRGB::Cyan,
-  CRGB::White,
-  CRGB::Black
+  0xFF0000,      // Red
+  0x00FF00,      // Green
+  0x000000       // Black (off)
 };
 #define NUM_COLORS (sizeof(colorOptions) / sizeof(colorOptions[0]))
 
@@ -92,16 +89,17 @@ const unsigned long SNAKE_SPEED = 150;    // Slower snake movement
 const unsigned long CHASE_SPEED = 120;    // Slightly slower chase pattern
 const unsigned long WAVE_SPEED = 80;      // Medium speed for wave
 const unsigned long BREATHE_SPEED = 30;   // Keep breathe relatively smooth
+const unsigned long TWINKLE_SPEED = 100;  // Christmas twinkle speed
 
 // Snake Pattern Variables
 uint8_t snakeHeadPos = 0;
-const uint8_t snakeLength = 6;
+const uint8_t snakeLength = 3;
 uint8_t snakeHue = 0;
 
 // Random Blink Variables
-uint8_t randomLEDs[5] = {0};  // Tracks which LEDs are currently active
-uint8_t randomHues[5] = {0};  // Hues for random LEDs
-unsigned long randomBlinkInterval = 500;  // Slower random blink (was 200)
+uint8_t randomLEDs[3] = {0};  // Tracks which LEDs are currently active
+uint8_t randomHues[3] = {0};  // Hues for random LEDs
+unsigned long randomBlinkInterval = 500;  // Slower random blink
 unsigned long lastRandomUpdate = 0;
 
 // Chase Pattern Variables
@@ -115,52 +113,198 @@ bool breatheIncreasing = true;
 // Wave Pattern Variables
 uint8_t waveOffset = 0;
 
+// Christmas Twinkle Variables
+uint8_t twinkleLEDs[NUM_LEDS] = {0};
+unsigned long lastTwinkleUpdate = 0;
+
 // LDR Reactive Mode Variables
 uint8_t ldrHue = 0;
 unsigned long lastLdrHueUpdate = 0;
 
-// Music Notes
-const int NOTE_C4 = 262;
-const int NOTE_D4 = 294;
-const int NOTE_E4 = 330;
-const int NOTE_F4 = 349;
-const int NOTE_G4 = 392;
-const int NOTE_A4 = 440;
-const int NOTE_B4 = 494;
-const int NOTE_C5 = 523;
-const int NOTE_D5 = 587;
-const int NOTE_E5 = 659;
-const int NOTE_F5 = 698;
-const int NOTE_G5 = 784;
+// Bluetooth LE Flag
+bool bleEnabled = false;
 
-// Happy Birthday Melody
-const int melody[] = {
-  NOTE_G4, NOTE_G4, NOTE_A4, NOTE_G4, NOTE_C5, NOTE_B4,
-  NOTE_G4, NOTE_G4, NOTE_A4, NOTE_G4, NOTE_D5, NOTE_C5,
-  NOTE_G4, NOTE_G4, NOTE_G5, NOTE_E5, NOTE_C5, NOTE_B4, NOTE_A4,
-  NOTE_F5, NOTE_F5, NOTE_E5, NOTE_C5, NOTE_D5, NOTE_C5
+// Christmas Music Notes with correct frequencies
+#define NOTE_B0  31
+#define NOTE_C1  33
+#define NOTE_CS1 35
+#define NOTE_D1  37
+#define NOTE_DS1 39
+#define NOTE_E1  41
+#define NOTE_F1  44
+#define NOTE_FS1 46
+#define NOTE_G1  49
+#define NOTE_GS1 52
+#define NOTE_A1  55
+#define NOTE_AS1 58
+#define NOTE_B1  62
+#define NOTE_C2  65
+#define NOTE_CS2 69
+#define NOTE_D2  73
+#define NOTE_DS2 78
+#define NOTE_E2  82
+#define NOTE_F2  87
+#define NOTE_FS2 93
+#define NOTE_G2  98
+#define NOTE_GS2 104
+#define NOTE_A2  110
+#define NOTE_AS2 117
+#define NOTE_B2  123
+#define NOTE_C3  131
+#define NOTE_CS3 139
+#define NOTE_D3  147
+#define NOTE_DS3 156
+#define NOTE_E3  165
+#define NOTE_F3  175
+#define NOTE_FS3 185
+#define NOTE_G3  196
+#define NOTE_GS3 208
+#define NOTE_A3  220
+#define NOTE_AS3 233
+#define NOTE_B3  247
+#define NOTE_C4  262
+#define NOTE_CS4 277
+#define NOTE_D4  294
+#define NOTE_DS4 311
+#define NOTE_E4  330
+#define NOTE_F4  349
+#define NOTE_FS4 370
+#define NOTE_G4  392
+#define NOTE_GS4 415
+#define NOTE_A4  440
+#define NOTE_AS4 466
+#define NOTE_B4  494
+#define NOTE_C5  523
+#define NOTE_CS5 554
+#define NOTE_D5  587
+#define NOTE_DS5 622
+#define NOTE_E5  659
+#define NOTE_F5  698
+#define NOTE_FS5 740
+#define NOTE_G5  784
+#define NOTE_GS5 831
+#define NOTE_A5  880
+#define NOTE_AS5 932
+#define NOTE_B5  988
+#define NOTE_C6  1047
+#define NOTE_CS6 1109
+#define NOTE_D6  1175
+#define NOTE_DS6 1245
+#define NOTE_E6  1319
+#define NOTE_F6  1397
+#define NOTE_FS6 1480
+#define NOTE_G6  1568
+#define NOTE_GS6 1661
+#define NOTE_A6  1760
+#define NOTE_AS6 1865
+#define NOTE_B6  1976
+#define NOTE_C7  2093
+#define NOTE_CS7 2217
+#define NOTE_D7  2349
+#define NOTE_DS7 2489
+#define NOTE_E7  2637
+#define NOTE_F7  2794
+#define NOTE_FS7 2960
+#define NOTE_G7  3136
+#define NOTE_GS7 3322
+#define NOTE_A7  3520
+#define NOTE_AS7 3729
+#define NOTE_B7  3951
+#define NOTE_C8  4186
+#define NOTE_CS8 4435
+#define NOTE_D8  4699
+#define NOTE_DS8 4978
+#define REST     0
+
+// Jingle Bells Melody (corrected with accurate notes and tempo)
+const int jingleBells[] = {
+  NOTE_E5, NOTE_E5, NOTE_E5,
+  NOTE_E5, NOTE_E5, NOTE_E5,
+  NOTE_E5, NOTE_G5, NOTE_C5, NOTE_D5,
+  NOTE_E5,
+  NOTE_F5, NOTE_F5, NOTE_F5, NOTE_F5,
+  NOTE_F5, NOTE_E5, NOTE_E5, NOTE_E5, NOTE_E5,
+  NOTE_E5, NOTE_D5, NOTE_D5, NOTE_E5,
+  NOTE_D5, NOTE_G5
 };
 
-const int noteDurationFractions[] = {
-  8, 8, 4, 4, 4, 2,
-  8, 8, 4, 4, 4, 2,
-  8, 8, 4, 4, 4, 4, 4,
-  8, 8, 4, 4, 4, 2
+const int jingleBellsTempo[] = {
+  8, 8, 4,
+  8, 8, 4,
+  8, 8, 8, 8,
+  2,
+  8, 8, 8, 8,
+  8, 8, 8, 16, 16,
+  8, 8, 8, 8,
+  4, 4
+};
+const int jingleBellsLength = sizeof(jingleBells) / sizeof(jingleBells[0]);
+
+// We Wish You a Merry Christmas (corrected with accurate notes and tempo)
+const int wishMelody[] = {
+  NOTE_B3, 
+  NOTE_F4, NOTE_F4, NOTE_G4, NOTE_F4, NOTE_E4,
+  NOTE_D4, NOTE_D4, NOTE_D4,
+  NOTE_G4, NOTE_G4, NOTE_A4, NOTE_G4, NOTE_F4,
+  NOTE_E4, NOTE_E4, NOTE_E4,
+  NOTE_A4, NOTE_A4, NOTE_B4, NOTE_A4, NOTE_G4,
+  NOTE_F4, NOTE_D4, NOTE_B3, NOTE_B3,
+  NOTE_D4, NOTE_G4, NOTE_E4,
+  NOTE_F4
 };
 
-const int tempo = 250;
-const int melodyLength = sizeof(melody) / sizeof(melody[0]);
-int currentNote = 0;
+const int wishTempo[] = {
+  4,
+  4, 8, 8, 8, 8,
+  4, 4, 4,
+  4, 8, 8, 8, 8,
+  4, 4, 4,
+  4, 8, 8, 8, 8,
+  4, 4, 8, 8,
+  4, 4, 4,
+  2
+};
+const int wishLength = sizeof(wishMelody) / sizeof(wishMelody[0]);
+
+// Santa Claus Is Coming To Town (corrected with accurate notes and tempo)
+const int santaMelody[] = {
+  NOTE_G4,
+  NOTE_E4, NOTE_F4, NOTE_G4, NOTE_G4, NOTE_G4,
+  NOTE_A4, NOTE_B4, NOTE_C5, NOTE_C5, NOTE_C5,
+  NOTE_E4, NOTE_F4, NOTE_G4, NOTE_G4, NOTE_G4,
+  NOTE_A4, NOTE_G4, NOTE_F4, NOTE_F4,
+  NOTE_E4, NOTE_G4, NOTE_C4, NOTE_E4,
+  NOTE_D4, NOTE_F4, NOTE_B3,
+  NOTE_C4
+};
+
+const int santaTempo[] = {
+  8,
+  8, 8, 4, 4, 4,
+  8, 8, 4, 4, 4,
+  8, 8, 4, 4, 4,
+  8, 8, 4, 2,
+  4, 4, 4, 4,
+  4, 2, 4,
+  1
+};
+const int santaLength = sizeof(santaMelody) / sizeof(santaMelody[0]);
 
 // Song State Machine
 enum SongState {
   IDLE,
-  PLAYING_BIRTHDAY,
-  PLAYING_HIEPER,
+  PLAYING_JINGLE_BELLS,
+  PLAYING_WISH,
+  PLAYING_SANTA,
   COLOR_FADING,
   CONFETTI_MODE,
   ENDING
 };
+
+// Current song selection
+int currentSong = 0;
+const int NUM_SONGS = 3;
+
 SongState songState = IDLE;
 
 // Timing Variables
@@ -169,12 +313,10 @@ unsigned long noteEndTime = 0;
 unsigned long noteDuration = 0;
 unsigned long pauseDuration = 0;
 bool noteIsPlaying = false;
+int currentNote = 0;
 
 // Animation Variables
 int ledsLit = 0;
-const int hieperSequence[] = { 1, 1, 1, 1, 3, 1, 2 };  // 0=very short, 1=short, 2=long, 3=pause
-const int hieperLength = 7;
-int currentHieperNote = 0;
 
 // Color Fading
 uint8_t colorFadeHue = 0;
@@ -205,13 +347,13 @@ void updateRandomBlinkPattern(unsigned long currentTime);
 void updateChasePattern();
 void updateBreathePattern();
 void updateWavePattern();
+void updateChristmasTwinkle();
 void turnOffAllLEDs();
 void updateDisplay();
-void turnOnDigit1(CRGB color);
-void turnOnDigit2(CRGB color);
-void startBirthdaySong();
+void startChristmasSong(int songIndex);
 void stopSong();
-void startConfettiMode();
+void enableBluetooth();
+void disableBluetooth();
 void updateColorFade();
 void updateConfettiMode();
 void updateSong();
@@ -227,12 +369,17 @@ void setup() {
   FastLED.addLeds<WS2812B, RGB_PIN, GRB>(leds, NUM_LEDS);
   FastLED.setBrightness(BASE_BRIGHTNESS);
 
+  // Initialize average for LDR readings
+  for (int i = 0; i < LDR_SAMPLES; i++) {
+    ldrReadings[i] = 0;
+  }
+
   // Initial state
   updateDisplay();
 
   // Start serial
   Serial.begin(115200);
-  Serial.println("18th BirthdayCard Ready!");
+  Serial.println("Christmas Card Ready!");
 }
 
 void loop() {
@@ -250,8 +397,6 @@ void loop() {
     updateConfettiMode();
   }
 
-
-  
   FastLED.show();
 }
 
@@ -313,8 +458,8 @@ void checkLDR() {
     // Check if it's been dark long enough to trigger dark event
     if (wasDark && !isDark && (currentTime - darkStartTime > darkDuration)) {
       isDark = true;
-      Serial.println("DARKNESS DETECTED! Triggering dark event");
-      // You can add any actions to take when darkness is detected here
+      Serial.println("DARKNESS DETECTED! No action taken.");
+      // Note: removed song triggering - just log the event
     }
     
     // Log status change if it changed
@@ -322,13 +467,13 @@ void checkLDR() {
       Serial.print("Light status changed to: ");
       switch (currentLightStatus) {
         case LIGHT_DARK:
-          Serial.println("DARK");
+          Serial.println("DARK - Brightness set to maximum");
           break;
         case LIGHT_MEDIUM:
-          Serial.println("MEDIUM");
+          Serial.println("MEDIUM - Brightness adjusted");
           break;
         case LIGHT_BRIGHT:
-          Serial.println("BRIGHT");
+          Serial.println("BRIGHT - Brightness reduced");
           break;
       }
     }
@@ -359,28 +504,59 @@ void updateLdrReactiveMode() {
     case LIGHT_DARK:
       if (isDark) {
         // Special effect when persistent darkness is detected
-        // Dramatic pulsing with blue/purple hues
+        // Dramatic pulsing with red/green Christmas colors
         uint8_t pulseValue = sin8(millis()/20);
-        fill_solid(leds, NUM_LEDS, CHSV(200, 255, pulseValue));
+        
+        // Alternating red and green for Christmas
+        for (int i = 0; i < NUM_LEDS; i++) {
+          if (i % 2 == 0) {
+            leds[i] = CHSV(0, 255, pulseValue); // Red
+          } else {
+            leds[i] = CHSV(96, 255, pulseValue); // Green
+          }
+        }
       } else {
-        // Normal dark room effect - slower pulsing blue
-        fill_solid(leds, NUM_LEDS, CHSV(180 + (sin8(millis()/10) / 8), 255, brightness));
+        // Normal dark room effect - slower pulsing red/green
+        uint8_t timeValue = millis()/10;
+        for (int i = 0; i < NUM_LEDS; i++) {
+          if (sin8(timeValue + i*20) > 200) {
+            leds[i] = CRGB::Red;
+          } else if (sin8(timeValue + i*20) < 50) {
+            leds[i] = CRGB::Green;
+          } else {
+            leds[i] = CRGB::Gold;
+          }
+        }
       }
       break;
       
     case LIGHT_MEDIUM:
-      // Medium brightness effect - teal-blue gradient
+      // Medium brightness effect - Christmas colors gradient
       for(int i = 0; i < NUM_LEDS; i++) {
-        // Create a nice teal-blue gradient for medium lighting
-        leds[i] = CHSV(150 + (i * 30 / NUM_LEDS), 255, brightness);
+        // Create a nice red-green-gold gradient for medium lighting
+        uint8_t pos = (ldrHue + i * 5) % 255;
+        if (pos < 85) {
+          leds[i] = CRGB::Red;
+        } else if (pos < 170) {
+          leds[i] = CRGB::Green;
+        } else {
+          leds[i] = CRGB::Gold;
+        }
       }
       break;
       
     case LIGHT_BRIGHT:
-      // Bright room effect - vibrant colors
+      // Bright room effect - more subtle Christmas colors
       for(int i = 0; i < NUM_LEDS; i++) {
-        // Create a yellow-red-magenta gradient for bright conditions
-        leds[i] = CHSV((i * 60 / NUM_LEDS), 255, brightness);
+        // Softer colors for bright conditions
+        uint8_t pos = (ldrHue + i * 10) % 255;
+        if (pos < 85) {
+          leds[i] = CRGB(150, 0, 0); // Darker red
+        } else if (pos < 170) {
+          leds[i] = CRGB(0, 150, 0); // Darker green
+        } else {
+          leds[i] = CRGB(100, 80, 0); // Darker gold
+        }
       }
       break;
   }
@@ -391,7 +567,6 @@ void updateLdrReactiveMode() {
     ldrHue++;
   }
 }
-  
 
 void checkButtons() {
   bool reading1 = digitalRead(BUTTON1);
@@ -403,10 +578,26 @@ void checkButtons() {
   }
 
   if ((millis() - lastDebounceTime) > debounceDelay) {
-    // Button 1 - Change mode
+    // Button 1 - Control Songs
     if (reading1 != button1State) {
       button1State = reading1;
       if (button1State == LOW) {
+        if (songState == IDLE) {
+          // If not playing, start the current song
+          startChristmasSong(currentSong);
+        } else {
+          // If already playing, stop the current song and start the next one
+          stopSong();
+          currentSong = (currentSong + 1) % NUM_SONGS;
+          startChristmasSong(currentSong);
+        }
+      }
+    }
+
+    // Button 2 - Change LED patterns
+    if (reading2 != button2State) {
+      button2State = reading2;
+      if (button2State == LOW) {
         // If we're in a static color mode, increment the color
         if (currentMode == STATIC_COLOR) {
           currentColorIndex = (currentColorIndex + 1) % NUM_COLORS;
@@ -433,18 +624,6 @@ void checkButtons() {
         updateDisplay();  // Update display based on new mode
       }
     }
-
-    // Button 2 - Play song
-    if (reading2 != button2State) {
-      button2State = reading2;
-      if (button2State == LOW) {
-        if (songState == IDLE) {
-          startBirthdaySong();
-        } else {
-          stopSong();
-        }
-      }
-    }
   }
 
   lastButton1State = reading1;
@@ -460,13 +639,67 @@ void checkBothButtons() {
       bothButtonsPressed = true;
       bothButtonsStartTime = millis();
     } else if (millis() - bothButtonsStartTime >= BOTH_BUTTONS_HOLD_TIME) {
-      if (songState != CONFETTI_MODE) {
-        startConfettiMode();
+      // Special mode - toggle Bluetooth LE
+      if (!bleEnabled) {
+        enableBluetooth();
+      } else {
+        disableBluetooth();
       }
+      // Reset timer to avoid triggering multiple times
+      bothButtonsStartTime = millis();
     }
   } else {
     bothButtonsPressed = false;
   }
+}
+
+void enableBluetooth() {
+  Serial.println("BLUETOOTH MODE ACTIVATED!");
+  Serial.println("BLE Device Name: christmas PCB");
+  
+  // Here you would add code to actually enable BLE
+  // This depends on which BLE library you're using
+  // For example:
+  // BLEDevice::init("christmas PCB");
+  
+  bleEnabled = true;
+  
+  // Visual indication that BLE is enabled
+  for (int i = 0; i < 3; i++) {
+    fill_solid(leds, NUM_LEDS, CRGB::Blue);
+    FastLED.show();
+    delay(300);
+    fill_solid(leds, NUM_LEDS, CRGB::Black);
+    FastLED.show();
+    delay(300);
+  }
+  
+  // Restore display
+  updateDisplay();
+}
+
+void disableBluetooth() {
+  Serial.println("BLUETOOTH MODE DEACTIVATED!");
+  
+  // Here you would add code to disable BLE
+  // This depends on which BLE library you're using
+  // For example:
+  // BLEDevice::deinit();
+  
+  bleEnabled = false;
+  
+  // Visual indication that BLE is disabled
+  for (int i = 0; i < 3; i++) {
+    fill_solid(leds, NUM_LEDS, CRGB::Red);
+    FastLED.show();
+    delay(300);
+    fill_solid(leds, NUM_LEDS, CRGB::Black);
+    FastLED.show();
+    delay(300);
+  }
+  
+  // Restore display
+  updateDisplay();
 }
 
 void updatePatterns() {
@@ -491,6 +724,9 @@ void updatePatterns() {
       break;
     case BREATHE_MODE:
       patternUpdateInterval = BREATHE_SPEED;
+      break;
+    case CHRISTMAS_TWINKLE:
+      patternUpdateInterval = TWINKLE_SPEED;
       break;
     case RANDOM_BLINK:
       // Random blink uses its own timing mechanism
@@ -536,6 +772,10 @@ void updatePatterns() {
         updateWavePattern();
         break;
         
+      case CHRISTMAS_TWINKLE:
+        updateChristmasTwinkle();
+        break;
+        
       case OFF_MODE:
         turnOffAllLEDs();
         break;
@@ -559,14 +799,20 @@ void updateSnakePattern() {
   
   // Update snake head position
   snakeHeadPos = (snakeHeadPos + 1) % NUM_LEDS;
-  snakeHue += 1;  // Slower color change for snake (was 2)
+  snakeHue += 1;  // Slower color change for snake
   
-  // Draw the snake body
+  // Draw the snake body - Christmas colors
   for (int i = 0; i < snakeLength; i++) {
     int pos = (snakeHeadPos - i + NUM_LEDS) % NUM_LEDS;  // Ensure positive wrap-around
     // Fade the brightness based on distance from head
     int brightness = 255 - (i * 255 / snakeLength);
-    leds[pos] = CHSV(snakeHue, 255, brightness);
+    
+    // Christmas red and green alternating
+    if ((snakeHue / 20) % 2 == 0) {
+      leds[pos] = CRGB(brightness, 0, 0); // Red
+    } else {
+      leds[pos] = CRGB(0, brightness, 0); // Green
+    }
   }
 }
 
@@ -576,75 +822,117 @@ void updateRandomBlinkPattern(unsigned long currentTime) {
     lastRandomUpdate = currentTime;
     
     // Turn off old random LEDs
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 3; i++) {
       if (randomLEDs[i] < NUM_LEDS) {
         leds[randomLEDs[i]] = CRGB::Black;
       }
     }
     
-    // Generate new random LEDs
-    for (int i = 0; i < 5; i++) {
+    // Generate new random LEDs with Christmas colors
+    for (int i = 0; i < 3; i++) {
       randomLEDs[i] = random8(NUM_LEDS);
-      randomHues[i] = random8();
-      leds[randomLEDs[i]] = CHSV(randomHues[i], 255, 255);
+      randomHues[i] = random8(3); // 0, 1, or 2
+      
+      // Christmas color scheme
+      if (randomHues[i] == 0) {
+        leds[randomLEDs[i]] = CRGB::Red;
+      } else if (randomHues[i] == 1) {
+        leds[randomLEDs[i]] = CRGB::Green;
+      } else {
+        leds[randomLEDs[i]] = CRGB::Gold;
+      }
     }
   }
 }
 
 void updateChasePattern() {
-  // A chase pattern that runs around the digits
+  // A chase pattern that runs around the LEDs
   turnOffAllLEDs();
   
-  // First handle digit 1 (the "1")
-  if (chasePos < 6) {
-    leds[digit1Mapping[chasePos]] = CHSV(chaseHue, 255, 255);
-  } 
-  // Then handle digit 2 (the "8")
-  else if (chasePos < 18) {
-    leds[digit2Mapping[chasePos - 6]] = CHSV(chaseHue, 255, 255);
+  // Christmas colors chase
+  int position = chasePos % NUM_LEDS;
+  
+  // Christmas Red, Green, or Gold
+  uint8_t colorChoice = (chasePos / 3) % 3;
+  
+  if (colorChoice == 0) {
+    leds[position] = CRGB::Red;
+  } else if (colorChoice == 1) {
+    leds[position] = CRGB::Green;
+  } else {
+    leds[position] = CRGB::Gold;
   }
   
-  // Update position and hue
-  chasePos = (chasePos + 1) % 18;
-  chaseHue += 5;
+  // Update position
+  chasePos = (chasePos + 1) % NUM_LEDS;
 }
 
 void updateBreathePattern() {
   // Breathing effect - all LEDs fade in and out together
   if (breatheIncreasing) {
-    breatheBrightness += 3;  // Slower increase (was 5)
+    breatheBrightness += 3;  // Slower increase
     if (breatheBrightness >= 250) {
       breatheIncreasing = false;
     }
   } else {
-    breatheBrightness -= 3;  // Slower decrease (was 5)
+    breatheBrightness -= 3;  // Slower decrease
     if (breatheBrightness <= 5) {
       breatheIncreasing = true;
       colorFadeHue += 5;  // Change color slightly with each breath
     }
   }
   
-  fill_solid(leds, NUM_LEDS, CHSV(colorFadeHue, 255, breatheBrightness));
+  // Use fixed colors for Christmas - alternate between red and green
+  if ((colorFadeHue / 20) % 2 == 0) {
+    fill_solid(leds, NUM_LEDS, CRGB(breatheBrightness, 0, 0)); // Red
+  } else {
+    fill_solid(leds, NUM_LEDS, CRGB(0, breatheBrightness, 0)); // Green
+  }
+  
   FastLED.setBrightness(255); // Override global brightness to allow full breathe effect
 }
 
 void updateWavePattern() {
-  // Wave pattern - a sine wave of color moving through the digits
+  // Wave pattern - a sine wave of color moving through the LEDs
   waveOffset += 5;
   
-  for (int i = 0; i < 6; i++) {
-    // Creating a wave effect through the first digit
-    uint8_t sinBrightness = sin8(waveOffset + (i * 255 / 6));
-    leds[digit1Mapping[i]] = CHSV(colorFadeHue, 255, sinBrightness);
+  for (int i = 0; i < NUM_LEDS; i++) {
+    // Creating a wave effect through the LEDs with Christmas colors
+    uint8_t sinBrightness = sin8(waveOffset + (i * 255 / NUM_LEDS));
+    
+    // Use different colors for different parts of the strip
+    if (i < NUM_LEDS/3) {
+      leds[i] = CRGB(sinBrightness, 0, 0); // Red wave
+    } 
+    else if (i < 2*NUM_LEDS/3) {
+      leds[i] = CRGB(0, sinBrightness, 0); // Green wave
+    }
+    else {
+      leds[i] = CRGB(sinBrightness, sinBrightness/2, 0); // Gold-ish wave
+    }
+  }
+}
+
+void updateChristmasTwinkle() {
+  // Christmas twinkle effect - random LEDs twinkle like Christmas lights
+  // Fade all LEDs slightly
+  for (int i = 0; i < NUM_LEDS; i++) {
+    leds[i].fadeToBlackBy(10);
   }
   
-  for (int i = 0; i < 12; i++) {
-    // Creating a wave effect through the second digit
-    uint8_t sinBrightness = sin8(waveOffset + ((i + 6) * 255 / 12));
-    leds[digit2Mapping[i]] = CHSV(colorFadeHue + 30, 255, sinBrightness); // Offset hue for contrast
+  // Randomly light up LEDs with Christmas colors
+  if (random8(3) == 0) {
+    int pos = random8(NUM_LEDS);
+    int colorChoice = random8(3);
+    
+    if (colorChoice == 0) {
+      leds[pos] = CRGB::Red;
+    } else if (colorChoice == 1) {
+      leds[pos] = CRGB::Green;
+    } else {
+      leds[pos] = CRGB::Gold;
+    }
   }
-  
-  colorFadeHue++;  // Slowly change the base color
 }
 
 void turnOffAllLEDs() {
@@ -663,8 +951,7 @@ void updateDisplay() {
   // Then set the display according to current mode
   switch (currentMode) {
     case STATIC_COLOR:
-      turnOnDigit1(colorOptions[currentColorIndex]);
-      turnOnDigit2(colorOptions[currentColorIndex]);
+      fill_solid(leds, NUM_LEDS, colorOptions[currentColorIndex]);
       break;
       
     case RAINBOW_MODE:
@@ -679,7 +966,7 @@ void updateDisplay() {
       
     case RANDOM_BLINK:
       // Initialize random blink
-      for (int i = 0; i < 5; i++) {
+      for (int i = 0; i < 3; i++) {
         randomLEDs[i] = random8(NUM_LEDS);
         randomHues[i] = random8();
       }
@@ -704,6 +991,10 @@ void updateDisplay() {
       colorFadeHue = random8();
       break;
       
+    case CHRISTMAS_TWINKLE:
+      // Initialize Christmas twinkle
+      break;
+      
     case OFF_MODE:
       // All LEDs off, already handled by turnOffAllLEDs()
       break;
@@ -720,25 +1011,28 @@ void updateDisplay() {
   }
 }
 
-void turnOnDigit1(CRGB color) {
-  for (int i = 0; i < 6; i++) {
-    leds[digit1Mapping[i]] = color;
-  }
-}
-
-void turnOnDigit2(CRGB color) {
-  for (int i = 0; i < 12; i++) {
-    leds[digit2Mapping[i]] = color;
-  }
-}
-
-void startBirthdaySong() {
+void startChristmasSong(int songIndex) {
   currentNote = 0;
   ledsLit = 0;
-  songState = PLAYING_BIRTHDAY;
+  
+  // Set which Christmas song to play based on the index
+  switch (songIndex) {
+    case 0:
+      songState = PLAYING_JINGLE_BELLS;
+      Serial.println("Starting Jingle Bells");
+      break;
+    case 1:
+      songState = PLAYING_WISH;
+      Serial.println("Starting We Wish You a Merry Christmas");
+      break;
+    case 2:
+      songState = PLAYING_SANTA;
+      Serial.println("Starting Santa Claus is Coming to Town");
+      break;
+  }
+  
   previousNoteTime = millis();
   noteIsPlaying = false;
-  turnOffAllLEDs();
   
   // If not in static color mode, select a random color for the song
   if (currentMode != STATIC_COLOR) {
@@ -746,8 +1040,6 @@ void startBirthdaySong() {
     Serial.print("Selected random color for song: ");
     Serial.println(currentColorIndex);
   }
-  
-  Serial.println("Starting birthday song");
 }
 
 void stopSong() {
@@ -755,24 +1047,6 @@ void stopSong() {
   noTone(BUZZER);
   updateDisplay();
   Serial.println("Song stopped");
-}
-
-void startConfettiMode() {
-  Serial.println("CONFETTI MODE ACTIVATED!");
-  songState = CONFETTI_MODE;
-  confettiStartTime = millis();
-  confettiHue = 0;
-
-  // Celebration sound
-  tone(BUZZER, NOTE_E5, 200);
-  delay(200);
-  tone(BUZZER, NOTE_C5, 100);
-  delay(100);
-  tone(BUZZER, NOTE_G5, 500);
-
-  // Print secret message
-  Serial.println("Secret message activated!");
-  turnOffAllLEDs();
 }
 
 void updateColorFade() {
@@ -783,17 +1057,34 @@ void updateColorFade() {
     colorFadeHue++;
 
     for (int i = 0; i < NUM_LEDS; i++) {
-      leds[i] = CHSV(colorFadeHue + (i * 255 / NUM_LEDS), 255, 255);
+      // Use only red and green for Christmas color fading
+      uint8_t hue = (colorFadeHue + (i * 128 / NUM_LEDS)) % 255;
+      if (hue < 128) {
+        // Red to yellow range
+        uint8_t greenVal = map(hue, 0, 127, 0, 255);
+        leds[i] = CRGB(255, greenVal, 0);
+      } else {
+        // Yellow to green range
+        uint8_t redVal = map(hue, 128, 255, 255, 0);
+        leds[i] = CRGB(redVal, 255, 0);
+      }
     }
   }
 }
 
 void updateConfettiMode() {
-  // Add new confetti
+  // Add new confetti in Christmas colors
   if (random8() < CONFETTI_SPAWN_RATE) {
     int pos = random16(NUM_LEDS);
-    leds[pos] = CHSV(confettiHue + random8(32), 200 + random8(55), 200 + random8(55));
-    confettiHue += random8(8, 16);
+    int colorChoice = random8(3);
+    
+    if (colorChoice == 0) {
+      leds[pos] = CRGB::Red;
+    } else if (colorChoice == 1) {
+      leds[pos] = CRGB::Green;
+    } else {
+      leds[pos] = CRGB::Gold;
+    }
   }
 
   // Fade out
@@ -814,23 +1105,26 @@ void updateSong() {
     case IDLE:
       break;
 
-    case PLAYING_BIRTHDAY:
+    case PLAYING_JINGLE_BELLS:
       if (!noteIsPlaying && currentTime >= previousNoteTime) {
-        if (currentNote < melodyLength) {
+        if (currentNote < jingleBellsLength) {
           // Play note
-          noteDuration = (tempo * 4 / noteDurationFractions[currentNote]);
+          noteDuration = (1000 / jingleBellsTempo[currentNote]);
           pauseDuration = noteDuration * 0.3;
-          tone(BUZZER, melody[currentNote], noteDuration);
+          tone(BUZZER, jingleBells[currentNote], noteDuration);
 
-          // Light LEDs progressively
-          float ledsPerNote = (float)(NUM_LEDS) / melodyLength;
+          // Light LEDs progressively based on song progress
+          float ledsPerNote = (float)(NUM_LEDS) / jingleBellsLength;
           int targetLEDs = round((currentNote + 1) * ledsPerNote);
 
           while (ledsLit < targetLEDs && ledsLit < NUM_LEDS) {
-            if (ledsLit < 6) {
-              leds[digit1Mapping[ledsLit]] = colorOptions[currentColorIndex];
+            // Christmas color pattern
+            if (ledsLit % 3 == 0) {
+              leds[ledsLit] = CRGB::Red;
+            } else if (ledsLit % 3 == 1) {
+              leds[ledsLit] = CRGB::Green;
             } else {
-              leds[digit2Mapping[ledsLit - 6]] = colorOptions[currentColorIndex];
+              leds[ledsLit] = CRGB::Gold;
             }
             ledsLit++;
           }
@@ -838,12 +1132,11 @@ void updateSong() {
           noteEndTime = currentTime + noteDuration;
           noteIsPlaying = true;
         } else {
-          // Song complete, transition to hieper
-          fill_solid(leds, NUM_LEDS, colorOptions[currentColorIndex]);
-          songState = PLAYING_HIEPER;
-          currentHieperNote = 0;
-          noteIsPlaying = false;
-          previousNoteTime = currentTime + 500;
+          // Song complete, transition to color fading
+          songState = COLOR_FADING;
+          colorFadeHue = 0;
+          lastColorFadeUpdate = currentTime;
+          Serial.println("Jingle Bells complete, starting color fade");
         }
       } else if (noteIsPlaying && currentTime >= noteEndTime) {
         noteIsPlaying = false;
@@ -852,50 +1145,83 @@ void updateSong() {
       }
       break;
 
-    case PLAYING_HIEPER:
+    case PLAYING_WISH:
       if (!noteIsPlaying && currentTime >= previousNoteTime) {
-        if (currentHieperNote < hieperLength) {
-          int hieperType = hieperSequence[currentHieperNote];
-          if (hieperType == 0) {  // Very short beep
-            tone(BUZZER, NOTE_C5, 80);
-            noteDuration = 80;
-            fill_solid(leds, NUM_LEDS, CRGB::White);
-          } else if (hieperType == 1) {  // Short beep
-            tone(BUZZER, NOTE_C5, 150);
-            noteDuration = 150;
-            fill_solid(leds, NUM_LEDS, CRGB::White);
-          } else if (hieperType == 3) {  // Pause
-            noTone(BUZZER);
-            noteDuration = 300;  // 0.3-second pause
-            turnOffAllLEDs();
-          } else {                       // Long beep (type 2)
-            tone(BUZZER, NOTE_C5, 800);  // Extended length for the final "piieeeeep"
-            noteDuration = 800;
-            for (int j = 0; j < NUM_LEDS; j++) {
-              leds[j] = CHSV(j * 255 / NUM_LEDS, 255, 255);
+        if (currentNote < wishLength) {
+          // Play note
+          noteDuration = (1000 / wishTempo[currentNote]);
+          pauseDuration = noteDuration * 0.3;
+          tone(BUZZER, wishMelody[currentNote], noteDuration);
+
+          // Light LEDs progressively based on song progress
+          float ledsPerNote = (float)(NUM_LEDS) / wishLength;
+          int targetLEDs = round((currentNote + 1) * ledsPerNote);
+
+          while (ledsLit < targetLEDs && ledsLit < NUM_LEDS) {
+            // Christmas color pattern
+            if (ledsLit % 3 == 0) {
+              leds[ledsLit] = CRGB::Red;
+            } else if (ledsLit % 3 == 1) {
+              leds[ledsLit] = CRGB::Green;
+            } else {
+              leds[ledsLit] = CRGB::Gold;
             }
+            ledsLit++;
           }
+
           noteEndTime = currentTime + noteDuration;
           noteIsPlaying = true;
         } else {
+          // Song complete, transition to color fading
           songState = COLOR_FADING;
           colorFadeHue = 0;
           lastColorFadeUpdate = currentTime;
-          Serial.println("Starting color fade");
+          Serial.println("We Wish You a Merry Christmas complete, starting color fade");
         }
       } else if (noteIsPlaying && currentTime >= noteEndTime) {
         noteIsPlaying = false;
-        currentHieperNote++;
-        // Adjust timing based on the previous note type
-        if (currentHieperNote < hieperLength) {
-          if (hieperSequence[currentHieperNote - 1] == 0) {         // After very short beep
-            previousNoteTime = currentTime + 50;                    // Shorter pause
-          } else if (hieperSequence[currentHieperNote - 1] == 1) {  // After short beep
-            previousNoteTime = currentTime + 100;                   // Short pause
-          } else {                                                  // After long beep
-            previousNoteTime = currentTime + 200;                   // Longer pause
+        currentNote++;
+        previousNoteTime = currentTime + pauseDuration;
+      }
+      break;
+
+    case PLAYING_SANTA:
+      if (!noteIsPlaying && currentTime >= previousNoteTime) {
+        if (currentNote < santaLength) {
+          // Play note
+          noteDuration = (900 / santaTempo[currentNote]); // Note using 900 here for slightly faster tempo
+          pauseDuration = noteDuration * 0.3;
+          tone(BUZZER, santaMelody[currentNote], noteDuration);
+
+          // Light LEDs progressively based on song progress
+          float ledsPerNote = (float)(NUM_LEDS) / santaLength;
+          int targetLEDs = round((currentNote + 1) * ledsPerNote);
+
+          while (ledsLit < targetLEDs && ledsLit < NUM_LEDS) {
+            // Christmas color pattern
+            if (ledsLit % 3 == 0) {
+              leds[ledsLit] = CRGB::Red;
+            } else if (ledsLit % 3 == 1) {
+              leds[ledsLit] = CRGB::Green;
+            } else {
+              leds[ledsLit] = CRGB::White;
+            }
+            ledsLit++;
           }
+
+          noteEndTime = currentTime + noteDuration;
+          noteIsPlaying = true;
+        } else {
+          // Song complete, transition to color fading
+          songState = COLOR_FADING;
+          colorFadeHue = 0;
+          lastColorFadeUpdate = currentTime;
+          Serial.println("Santa Claus is Coming to Town complete, starting color fade");
         }
+      } else if (noteIsPlaying && currentTime >= noteEndTime) {
+        noteIsPlaying = false;
+        currentNote++;
+        previousNoteTime = currentTime + pauseDuration;
       }
       break;
 

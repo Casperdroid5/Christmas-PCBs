@@ -1,0 +1,48 @@
+# Adapted from:
+# https://github.com/github/gitignore/blob/master/KiCad.gitignore
+# For PCBs designed using KiCad: https://www.kicad.org/
+# Format documentation: https://docs.kicad.org/6.0/en/kicad/kicad.html#kicad_files_and_folders
+
+# Temporary files
+*.000
+*.bak
+*.bck
+*.kicad_pcb-bak
+*.kicad_sch-bak
+*.kicad_prl
+*.sch-bak
+*~
+_autosave-*
+*.tmp
+*-save.pro
+*-save.kicad_pcb
+fp-info-cache
+/build
+
+# Backup folder
+*-backups/
+
+
+# Netlist files (exported from Eeschema)
+*.net
+
+# Autorouter files (exported from Pcbnew)
+*.dsn
+*.ses
+
+# Footprint association file (exported from Pcbnew)
+*.cmp
+
+# Exported BOM files
+*.xml
+# *.csv
+*.tsv
+
+# Misc
+*.log
+*.raw
+.svg2shenzhen-cache
+*:Zone.Identifier*
+*\:Zone.Identifier*
+/Kinderdorp_PCB-backups
+fabrication-toolkit-options.json

@@ -11711,7 +11711,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "b88998e6-b7c4-44f8-8f80-47a2365cb616")
-		(property "Reference" "D1"
+		(property "Reference" "D2"
 			(at 217.17 38.1 0)
 			(effects
 				(font
@@ -11838,7 +11838,7 @@
 		(instances
 			(project "ChristmasPCB2025"
 				(path "/17f7643f-a16b-4802-8051-c0810a7f40c9"
-					(reference "D1")
+					(reference "D2")
 					(unit 1)
 				)
 			)

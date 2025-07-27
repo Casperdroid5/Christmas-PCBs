@@ -1,4 +1,4 @@
-5247916823074
+7001536946139
 Audio_Module
 Reverb_BTDR-1H
 Digital Reverberation Unit, http://www.belton.co.kr/inc/downfile.php?seq=17&file=pdf (footprint from http://www.uk-electronic.de/PDF/BTDR-1.pdf)
@@ -57140,6 +57140,13 @@ ceramic
 0
 3
 3
+CustomLed
+LED_WS2812B_PLCC4_5.0x5.0mm_P3.2mm
+5.0mm x 5.0mm Addressable RGB LED NeoPixel, https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf
+LED RGB NeoPixel PLCC-4 5050
+0
+4
+4
 Diode_SMD
 D_0201_0603Metric
 Diode SMD 0201 (0603 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: https://www.vishay.com/docs/20052/crcw0201e3.pdf), generated with kicad-footprint-generator

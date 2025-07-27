@@ -1,1241 +1,1090 @@
-#include <FastLED.h>
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <EEPROM.h>
+#include <ArduinoJson.h>
+#include <HDC2080.h>
 
-// Hardware Configuration
-#define RGB_PIN 3      // Data pin for LED strip
-#define BUZZER 10      // Buzzer pin
-#define BUTTON1 5      // Button 1 pin (play/change songs)
-#define BUTTON2 4      // Button 2 pin (change LED patterns)
-#define LDR_PIN 2      // Analog pin for LDR
-#define NUM_LEDS 6     // Total number of LEDs
-#define BASE_BRIGHTNESS 50  // Base brightness level
+// WiFi credentials - UPDATE THESE WITH YOUR NETWORK
+const char* ssid = "WIFICRT";
+const char* password = "JuCasSan27@#*";
 
-#define LDR_SAMPLES 10
-#define DARK_THRESHOLD 1650   // Room is dark below this value
-#define MEDIUM_THRESHOLD 2200 // Room is medium lit below this value
-#define BRIGHT_THRESHOLD 3000 // Room is brightly lit at or above this value
+// Fan control pins
+#define FAN1_PIN 25      // GPIO25 for FAN1_output
+#define FAN2_PIN 26      // GPIO26 for FAN2_output
+#define LED_PIN 13       // ESP32 built-in LED
+#define WATCHDOG_PIN 5   // GPIO5 for watchdog output
 
-// Light status enum
-enum LightStatus {
-  LIGHT_DARK,
-  LIGHT_MEDIUM,
-  LIGHT_BRIGHT
-};
+// PWM configuration
+#define FAN_PWM_FREQ 25000     // 25kHz PWM frequency
+#define FAN_PWM_CHANNEL_1 0    // PWM channel for fan 1
+#define FAN_PWM_CHANNEL_2 1    // PWM channel for fan 2
+#define LED_PWM_CHANNEL 2      // PWM channel for LED
+#define FAN_PWM_RESOLUTION 8   // 8-bit resolution (0-255)
+#define LED_PWM_RESOLUTION 8   // 8-bit resolution (0-255)
 
-int ldrReadings[LDR_SAMPLES];  // Array to store readings for moving average
-int ldrReadIndex = 0;          // Index for the current reading
-int ldrTotal = 0;              // Running total of readings
-bool isDark = false;           // Boolean for dark detection
-bool wasDark = false;          // Previous state
-unsigned long darkStartTime = 0; // Time when darkness was first detected
-unsigned long darkDuration = 5000; // Duration needed to trigger dark event (5 seconds)
-LightStatus currentLightStatus = LIGHT_MEDIUM; // Default light status
+// Runtime configuration
+#define RUNTIME_HOURS 8        // Run for 8 hours
+const unsigned long RUNTIME_MS = RUNTIME_HOURS * 60UL * 60UL * 1000UL;
 
-// LED Array
-CRGB leds[NUM_LEDS];
+// LED dimming configuration
+#define LED_START_BRIGHTNESS 255
+#define LED_END_BRIGHTNESS 0
+#define DIMMING_START_PERCENT 75
 
-// Button Handling
-bool button1State = HIGH;
-bool lastButton1State = HIGH;
-bool button2State = HIGH;
-bool lastButton2State = HIGH;
-unsigned long lastDebounceTime = 0;
-unsigned long debounceDelay = 50;
+// Watchdog configuration
+#define WATCHDOG_INTERVAL 10000 // 10 seconds
 
-// LDR Variables
-int ldrValue = 0;
-int brightness = BASE_BRIGHTNESS;
-unsigned long lastLdrCheck = 0;
-const unsigned long ldrCheckInterval = 500; // Check LDR every 500ms
+// EEPROM configuration
+#define EEPROM_SIZE 512
+#define EEPROM_FAN1_ADDR 0
+#define EEPROM_FAN2_ADDR 4
+#define EEPROM_MAGIC_ADDR 8
+#define EEPROM_ENABLED_ADDR 12  // Store fan enabled state
+#define EEPROM_TIMER_ADDR 16    // Store auto timer enabled state
+#define EEPROM_MAGIC_VALUE 0xABCD
 
-// Display Mode Enum - Christmas themed patterns
-enum DisplayMode {
-  STATIC_COLOR,
-  RAINBOW_MODE,
-  SNAKE_MODE,
-  RANDOM_BLINK,
-  CHASE_MODE,
-  BREATHE_MODE,
-  WAVE_MODE,
-  CHRISTMAS_TWINKLE,
-  OFF_MODE,
-  LDR_REACTIVE_MODE
-};
+// Settings save delay
+#define SETTINGS_SAVE_DELAY 15000 // 15 seconds
 
-// Current mode
-DisplayMode currentMode = STATIC_COLOR;
+// Global variables
+unsigned long startTime = 0;
+unsigned long lastWatchdogKick = 0;
+unsigned long lastStatusReport = 0;
+unsigned long lastSettingsChange = 0;
+bool settingsChanged = false;
+bool wifiConnected = false;
+bool fansEnabled = true;  // New: Fan enable/disable state
+unsigned long ledFlashStart = 0;  // New: LED flash timing
+bool ledFlashing = false;  // New: LED flash state
+bool autoTimerEnabled = true;  // New: Auto timer enable/disable
 
-// Color Options - Modified for Christmas colors
-int currentColorIndex = 0;
-CRGB colorOptions[] = {
-  CRGB::Red,
-  CRGB::Green,
-  CRGB::White,
-  CRGB::Gold,    // Christmas gold
-  CRGB::Blue,
-  CRGB::Purple,
-  0xFF0000,      // Red
-  0x00FF00,      // Green
-  0x000000       // Black (off)
-};
-#define NUM_COLORS (sizeof(colorOptions) / sizeof(colorOptions[0]))
+// Fan speeds (112-255, which is 44%-100%)
+int fan1Speed = 220;
+int fan2Speed = 220;
 
-// Pattern Variables
-unsigned long lastPatternUpdate = 0;
-unsigned long patternUpdateInterval = 50;  // Default update interval for patterns
+// HDC2080 sensors
+#define ADDR_SENSOR1 0x40
+#define ADDR_SENSOR2 0x41
+HDC2080 sensor1(ADDR_SENSOR1);
+HDC2080 sensor2(ADDR_SENSOR2);
 
-// Pattern-specific speed controls
-const unsigned long RAINBOW_SPEED = 100;  // Slower rainbow cycle
-const unsigned long SNAKE_SPEED = 150;    // Slower snake movement
-const unsigned long CHASE_SPEED = 120;    // Slightly slower chase pattern
-const unsigned long WAVE_SPEED = 80;      // Medium speed for wave
-const unsigned long BREATHE_SPEED = 30;   // Keep breathe relatively smooth
-const unsigned long TWINKLE_SPEED = 100;  // Christmas twinkle speed
+// Web server
+WebServer server(80);
 
-// Snake Pattern Variables
-uint8_t snakeHeadPos = 0;
-const uint8_t snakeLength = 3;
-uint8_t snakeHue = 0;
-
-// Random Blink Variables
-uint8_t randomLEDs[3] = {0};  // Tracks which LEDs are currently active
-uint8_t randomHues[3] = {0};  // Hues for random LEDs
-unsigned long randomBlinkInterval = 500;  // Slower random blink
-unsigned long lastRandomUpdate = 0;
-
-// Chase Pattern Variables
-uint8_t chasePos = 0;
-uint8_t chaseHue = 0;
-
-// Breathe Pattern Variables
-uint8_t breatheBrightness = 0;
-bool breatheIncreasing = true;
-
-// Wave Pattern Variables
-uint8_t waveOffset = 0;
-
-// Christmas Twinkle Variables
-uint8_t twinkleLEDs[NUM_LEDS] = {0};
-unsigned long lastTwinkleUpdate = 0;
-
-// LDR Reactive Mode Variables
-uint8_t ldrHue = 0;
-unsigned long lastLdrHueUpdate = 0;
-
-// Bluetooth LE Flag
-bool bleEnabled = false;
-
-// Christmas Music Notes with correct frequencies
-#define NOTE_B0  31
-#define NOTE_C1  33
-#define NOTE_CS1 35
-#define NOTE_D1  37
-#define NOTE_DS1 39
-#define NOTE_E1  41
-#define NOTE_F1  44
-#define NOTE_FS1 46
-#define NOTE_G1  49
-#define NOTE_GS1 52
-#define NOTE_A1  55
-#define NOTE_AS1 58
-#define NOTE_B1  62
-#define NOTE_C2  65
-#define NOTE_CS2 69
-#define NOTE_D2  73
-#define NOTE_DS2 78
-#define NOTE_E2  82
-#define NOTE_F2  87
-#define NOTE_FS2 93
-#define NOTE_G2  98
-#define NOTE_GS2 104
-#define NOTE_A2  110
-#define NOTE_AS2 117
-#define NOTE_B2  123
-#define NOTE_C3  131
-#define NOTE_CS3 139
-#define NOTE_D3  147
-#define NOTE_DS3 156
-#define NOTE_E3  165
-#define NOTE_F3  175
-#define NOTE_FS3 185
-#define NOTE_G3  196
-#define NOTE_GS3 208
-#define NOTE_A3  220
-#define NOTE_AS3 233
-#define NOTE_B3  247
-#define NOTE_C4  262
-#define NOTE_CS4 277
-#define NOTE_D4  294
-#define NOTE_DS4 311
-#define NOTE_E4  330
-#define NOTE_F4  349
-#define NOTE_FS4 370
-#define NOTE_G4  392
-#define NOTE_GS4 415
-#define NOTE_A4  440
-#define NOTE_AS4 466
-#define NOTE_B4  494
-#define NOTE_C5  523
-#define NOTE_CS5 554
-#define NOTE_D5  587
-#define NOTE_DS5 622
-#define NOTE_E5  659
-#define NOTE_F5  698
-#define NOTE_FS5 740
-#define NOTE_G5  784
-#define NOTE_GS5 831
-#define NOTE_A5  880
-#define NOTE_AS5 932
-#define NOTE_B5  988
-#define NOTE_C6  1047
-#define NOTE_CS6 1109
-#define NOTE_D6  1175
-#define NOTE_DS6 1245
-#define NOTE_E6  1319
-#define NOTE_F6  1397
-#define NOTE_FS6 1480
-#define NOTE_G6  1568
-#define NOTE_GS6 1661
-#define NOTE_A6  1760
-#define NOTE_AS6 1865
-#define NOTE_B6  1976
-#define NOTE_C7  2093
-#define NOTE_CS7 2217
-#define NOTE_D7  2349
-#define NOTE_DS7 2489
-#define NOTE_E7  2637
-#define NOTE_F7  2794
-#define NOTE_FS7 2960
-#define NOTE_G7  3136
-#define NOTE_GS7 3322
-#define NOTE_A7  3520
-#define NOTE_AS7 3729
-#define NOTE_B7  3951
-#define NOTE_C8  4186
-#define NOTE_CS8 4435
-#define NOTE_D8  4699
-#define NOTE_DS8 4978
-#define REST     0
-
-// Jingle Bells Melody (corrected with accurate notes and tempo)
-const int jingleBells[] = {
-  NOTE_E5, NOTE_E5, NOTE_E5,
-  NOTE_E5, NOTE_E5, NOTE_E5,
-  NOTE_E5, NOTE_G5, NOTE_C5, NOTE_D5,
-  NOTE_E5,
-  NOTE_F5, NOTE_F5, NOTE_F5, NOTE_F5,
-  NOTE_F5, NOTE_E5, NOTE_E5, NOTE_E5, NOTE_E5,
-  NOTE_E5, NOTE_D5, NOTE_D5, NOTE_E5,
-  NOTE_D5, NOTE_G5
-};
-
-const int jingleBellsTempo[] = {
-  8, 8, 4,
-  8, 8, 4,
-  8, 8, 8, 8,
-  2,
-  8, 8, 8, 8,
-  8, 8, 8, 16, 16,
-  8, 8, 8, 8,
-  4, 4
-};
-const int jingleBellsLength = sizeof(jingleBells) / sizeof(jingleBells[0]);
-
-// We Wish You a Merry Christmas (corrected with accurate notes and tempo)
-const int wishMelody[] = {
-  NOTE_B3, 
-  NOTE_F4, NOTE_F4, NOTE_G4, NOTE_F4, NOTE_E4,
-  NOTE_D4, NOTE_D4, NOTE_D4,
-  NOTE_G4, NOTE_G4, NOTE_A4, NOTE_G4, NOTE_F4,
-  NOTE_E4, NOTE_E4, NOTE_E4,
-  NOTE_A4, NOTE_A4, NOTE_B4, NOTE_A4, NOTE_G4,
-  NOTE_F4, NOTE_D4, NOTE_B3, NOTE_B3,
-  NOTE_D4, NOTE_G4, NOTE_E4,
-  NOTE_F4
-};
-
-const int wishTempo[] = {
-  4,
-  4, 8, 8, 8, 8,
-  4, 4, 4,
-  4, 8, 8, 8, 8,
-  4, 4, 4,
-  4, 8, 8, 8, 8,
-  4, 4, 8, 8,
-  4, 4, 4,
-  2
-};
-const int wishLength = sizeof(wishMelody) / sizeof(wishMelody[0]);
-
-// Santa Claus Is Coming To Town (corrected with accurate notes and tempo)
-const int santaMelody[] = {
-  NOTE_G4,
-  NOTE_E4, NOTE_F4, NOTE_G4, NOTE_G4, NOTE_G4,
-  NOTE_A4, NOTE_B4, NOTE_C5, NOTE_C5, NOTE_C5,
-  NOTE_E4, NOTE_F4, NOTE_G4, NOTE_G4, NOTE_G4,
-  NOTE_A4, NOTE_G4, NOTE_F4, NOTE_F4,
-  NOTE_E4, NOTE_G4, NOTE_C4, NOTE_E4,
-  NOTE_D4, NOTE_F4, NOTE_B3,
-  NOTE_C4
-};
-
-const int santaTempo[] = {
-  8,
-  8, 8, 4, 4, 4,
-  8, 8, 4, 4, 4,
-  8, 8, 4, 4, 4,
-  8, 8, 4, 2,
-  4, 4, 4, 4,
-  4, 2, 4,
-  1
-};
-const int santaLength = sizeof(santaMelody) / sizeof(santaMelody[0]);
-
-// Song State Machine
-enum SongState {
-  IDLE,
-  PLAYING_JINGLE_BELLS,
-  PLAYING_WISH,
-  PLAYING_SANTA,
-  COLOR_FADING,
-  CONFETTI_MODE,
-  ENDING
-};
-
-// Current song selection
-int currentSong = 0;
-const int NUM_SONGS = 3;
-
-SongState songState = IDLE;
-
-// Timing Variables
-unsigned long previousNoteTime = 0;
-unsigned long noteEndTime = 0;
-unsigned long noteDuration = 0;
-unsigned long pauseDuration = 0;
-bool noteIsPlaying = false;
-int currentNote = 0;
-
-// Animation Variables
-int ledsLit = 0;
-
-// Color Fading
-uint8_t colorFadeHue = 0;
-unsigned long lastColorFadeUpdate = 0;
-const unsigned long colorFadeUpdateInterval = 20;
-
-// Confetti Mode
-#define CONFETTI_DURATION 86400000 // 24 hours  
-#define CONFETTI_SPAWN_RATE 13
-#define CONFETTI_FADE_RATE 1
-unsigned long confettiStartTime = 0;
-uint8_t confettiHue = 1;
-
-// Button Combination Detection
-bool bothButtonsPressed = false;
-unsigned long bothButtonsStartTime = 0;
-#define BOTH_BUTTONS_HOLD_TIME 2000  // 2 second
-
-// Function declarations
-void checkButtons();
-void checkBothButtons();
-void checkLDR();
-void updatePatterns();
-void updateLdrReactiveMode();
-void updateRainbowPattern();
-void updateSnakePattern();
-void updateRandomBlinkPattern(unsigned long currentTime);
-void updateChasePattern();
-void updateBreathePattern();
-void updateWavePattern();
-void updateChristmasTwinkle();
-void turnOffAllLEDs();
-void updateDisplay();
-void startChristmasSong(int songIndex);
-void stopSong();
-void enableBluetooth();
-void disableBluetooth();
-void updateColorFade();
-void updateConfettiMode();
-void updateSong();
+// Function prototypes
+void updateLedBrightness(float percentComplete);
+void kickWatchdog();
+void reportStatus(unsigned long elapsedTime);
+void setupWiFi();
+void setupWebServer();
+void handleRoot();
+void handleAPI();
+void handleSetSpeed();
+void handleToggleFans();  // New: Toggle fans on/off
+void handleToggleTimer(); // New: Toggle auto timer
+void loadSettings();
+void saveSettings();
+void checkSettingsSave();
+void flashLED();  // New: Flash LED on command
+void updateFanOutputs();  // New: Update actual fan outputs
 
 void setup() {
-  // Initialize hardware
-  pinMode(BUZZER, OUTPUT);
-  pinMode(BUTTON1, INPUT_PULLUP);
-  pinMode(BUTTON2, INPUT_PULLUP);
-  pinMode(LDR_PIN, INPUT);  // Set LDR pin as input
-
-  // Initialize LEDs
-  FastLED.addLeds<WS2812B, RGB_PIN, GRB>(leds, NUM_LEDS);
-  FastLED.setBrightness(BASE_BRIGHTNESS);
-
-  // Initialize average for LDR readings
-  for (int i = 0; i < LDR_SAMPLES; i++) {
-    ldrReadings[i] = 0;
-  }
-
-  // Initial state
-  updateDisplay();
-
-  // Start serial
   Serial.begin(115200);
-  Serial.println("Christmas Card Ready!");
+  delay(2000);
+
+  // Initialize EEPROM
+  EEPROM.begin(EEPROM_SIZE);
+  loadSettings();
+
+  // Initialize I2C communication for both sensors
+  sensor1.begin();
+  sensor2.begin();
+
+  // Begin with a device reset for both sensors
+  sensor1.reset();
+  sensor2.reset();
+
+  // Configure Measurements for both sensors
+  sensor1.setMeasurementMode(TEMP_AND_HUMID);
+  sensor1.setRate(ONE_HZ);
+  sensor1.setTempRes(FOURTEEN_BIT);
+  sensor1.setHumidRes(FOURTEEN_BIT);
+
+  sensor2.setMeasurementMode(TEMP_AND_HUMID);
+  sensor2.setRate(ONE_HZ);
+  sensor2.setTempRes(FOURTEEN_BIT);
+  sensor2.setHumidRes(FOURTEEN_BIT);
+
+  // Begin measuring for both sensors
+  sensor1.triggerMeasurement();
+  sensor2.triggerMeasurement();
+
+  // Configure PWM for Fan 1
+  ledcSetup(FAN_PWM_CHANNEL_1, FAN_PWM_FREQ, FAN_PWM_RESOLUTION);
+  ledcAttachPin(FAN1_PIN, FAN_PWM_CHANNEL_1);
+
+  // Configure PWM for Fan 2
+  ledcSetup(FAN_PWM_CHANNEL_2, FAN_PWM_FREQ, FAN_PWM_RESOLUTION);
+  ledcAttachPin(FAN2_PIN, FAN_PWM_CHANNEL_2);
+
+  // Configure PWM for LED
+  ledcSetup(LED_PWM_CHANNEL, 5000, LED_PWM_RESOLUTION);
+  ledcAttachPin(LED_PIN, LED_PWM_CHANNEL);
+
+  // Configure Watchdog pin
+  pinMode(WATCHDOG_PIN, OUTPUT);
+  digitalWrite(WATCHDOG_PIN, HIGH);
+
+  // Set fan speeds to loaded values
+  updateFanOutputs();
+
+  // Set LED to full brightness initially
+  ledcWrite(LED_PWM_CHANNEL, LED_START_BRIGHTNESS);
+
+  // Setup WiFi and Web Server
+  setupWiFi();
+  setupWebServer();
+
+  Serial.printf("Fans running at PWM values: Fan1=%d, Fan2=%d (Enabled: %s)\n", 
+                fan1Speed, fan2Speed, fansEnabled ? "Yes" : "No");
+  Serial.printf("Fans will run for %d hours\n", RUNTIME_HOURS);
+  Serial.printf("LED will start dimming when %d%% of runtime has elapsed\n", DIMMING_START_PERCENT);
+
+  // Record start time
+  startTime = millis();
+  lastWatchdogKick = startTime;
+  lastStatusReport = startTime;
 }
 
 void loop() {
-  checkButtons();
-  checkBothButtons();
-  updateSong();
-  checkLDR();
-  
-  // Update pattern animations
-  updatePatterns();
-
-  if (songState == COLOR_FADING) {
-    updateColorFade();
-  } else if (songState == CONFETTI_MODE) {
-    updateConfettiMode();
-  }
-
-  FastLED.show();
-}
-
-void checkLDR() {
   unsigned long currentTime = millis();
-  
-  // Only check LDR periodically to avoid too much noise
-  if (currentTime - lastLdrCheck >= ldrCheckInterval) {
-    lastLdrCheck = currentTime;
-    
-    // Read raw LDR value (0-4095 for ESP32)
-    int rawReading = analogRead(LDR_PIN);
-    
-    // Update moving average
-    ldrTotal -= ldrReadings[ldrReadIndex];  // Subtract the oldest reading
-    ldrReadings[ldrReadIndex] = rawReading; // Add the new reading
-    ldrTotal += ldrReadings[ldrReadIndex];  // Add to the total
-    ldrReadIndex = (ldrReadIndex + 1) % LDR_SAMPLES; // Advance index
-    
-    // Calculate the average
-    ldrValue = ldrTotal / LDR_SAMPLES;
-    
-    // Determine light status
-    LightStatus previousStatus = currentLightStatus;
-    
-    if (ldrValue < DARK_THRESHOLD) {
-      currentLightStatus = LIGHT_DARK;
-      brightness = 255;  // Maximum brightness in dark conditions
-    } else if (ldrValue < MEDIUM_THRESHOLD) {
-      currentLightStatus = LIGHT_MEDIUM;
-      // Linear transition from 255 to 150 between dark and medium thresholds
-      brightness = 255 - ((ldrValue - DARK_THRESHOLD) * 105 / (MEDIUM_THRESHOLD - DARK_THRESHOLD));
-    } else {
-      currentLightStatus = LIGHT_BRIGHT;
-      // Linear transition from 150 to 30 between medium and bright thresholds
-      brightness = 150 - ((ldrValue - MEDIUM_THRESHOLD) * 120 / (BRIGHT_THRESHOLD - MEDIUM_THRESHOLD));
-      if (brightness < 30) brightness = 30; // Minimum brightness
-    }
-    
-    // Apply brightness if we're not in breathe mode
-    if (currentMode != BREATHE_MODE) {
-      FastLED.setBrightness(brightness);
-    }
-    
-    // Check if it's dark and track persistence
-    bool currentlyDark = (currentLightStatus == LIGHT_DARK);
-    
-    // State change: not dark -> dark
-    if (currentlyDark && !wasDark) {
-      darkStartTime = currentTime;
-      wasDark = true;
-    }
-    // State change: dark -> not dark
-    else if (!currentlyDark && wasDark) {
-      wasDark = false;
-      isDark = false;
-    }
-    
-    // Check if it's been dark long enough to trigger dark event
-    if (wasDark && !isDark && (currentTime - darkStartTime > darkDuration)) {
-      isDark = true;
-      Serial.println("DARKNESS DETECTED! No action taken.");
-      // Note: removed song triggering - just log the event
-    }
-    
-    // Log status change if it changed
-    if (previousStatus != currentLightStatus) {
-      Serial.print("Light status changed to: ");
-      switch (currentLightStatus) {
-        case LIGHT_DARK:
-          Serial.println("DARK - Brightness set to maximum");
-          break;
-        case LIGHT_MEDIUM:
-          Serial.println("MEDIUM - Brightness adjusted");
-          break;
-        case LIGHT_BRIGHT:
-          Serial.println("BRIGHT - Brightness reduced");
-          break;
-      }
-    }
-    
-    // If in LDR_REACTIVE_MODE, update the display based on light level
-    if (currentMode == LDR_REACTIVE_MODE) {
-      updateLdrReactiveMode();
-    }
-    
-    Serial.print("LDR Raw: ");
-    Serial.print(rawReading);
-    Serial.print(", Average: ");
-    Serial.print(ldrValue);
-    Serial.print(", Brightness: ");
-    Serial.print(brightness);
-    Serial.print(", Status: ");
-    Serial.print(currentLightStatus == LIGHT_DARK ? "DARK" : 
-                (currentLightStatus == LIGHT_MEDIUM ? "MEDIUM" : "BRIGHT"));
-    Serial.print(", Persistent Dark: ");
-    Serial.println(isDark ? "YES" : "NO");
+  unsigned long elapsedTime = currentTime - startTime;
+  float percentComplete = (float)elapsedTime / RUNTIME_MS * 100.0;
+
+  // Handle web server only if WiFi is connected
+  if (WiFi.status() == WL_CONNECTED) {
+    server.handleClient();
   }
+
+  // Handle LED flashing
+  if (ledFlashing && (millis() - ledFlashStart > 200)) {
+    ledFlashing = false;
+    // Don't restore LED here - let updateLedBrightness handle it
+  }
+
+  // Update LED brightness (this will override flash if needed)
+  if (!ledFlashing) {
+    updateLedBrightness(percentComplete);
+  }
+
+  // Check if settings should be saved
+  checkSettingsSave();
+
+  // Status report every 10 seconds
+  if (currentTime - lastStatusReport >= 10000) {
+    reportStatus(elapsedTime);
+    lastStatusReport = currentTime;
+  }
+
+  // Check if runtime is complete
+  if (autoTimerEnabled && elapsedTime >= RUNTIME_MS) {
+    fansEnabled = false;
+    updateFanOutputs();
+    ledcWrite(LED_PWM_CHANNEL, 0);
+    Serial.println("Runtime complete. Fans stopped.");
+    while (1) {
+      if (WiFi.status() == WL_CONNECTED) {
+        server.handleClient();
+      }
+      delay(1000);
+    }
+  }
+
+  // Watchdog kick
+  if (currentTime - lastWatchdogKick >= WATCHDOG_INTERVAL) {
+    kickWatchdog();
+    lastWatchdogKick = currentTime;
+  }
+
+  delay(100);
 }
 
-void updateLdrReactiveMode() {
-  // Using the three status levels: DARK, MEDIUM, BRIGHT
+void setupWiFi() {
+  // Add more detailed WiFi debugging
+  Serial.println("Starting WiFi connection...");
+  Serial.print("SSID: ");
+  Serial.println(ssid);
+  Serial.print("Password length: ");
+  Serial.println(strlen(password));
   
-  switch (currentLightStatus) {
-    case LIGHT_DARK:
-      if (isDark) {
-        // Special effect when persistent darkness is detected
-        // Dramatic pulsing with red/green Christmas colors
-        uint8_t pulseValue = sin8(millis()/20);
-        
-        // Alternating red and green for Christmas
-        for (int i = 0; i < NUM_LEDS; i++) {
-          if (i % 2 == 0) {
-            leds[i] = CHSV(0, 255, pulseValue); // Red
-          } else {
-            leds[i] = CHSV(96, 255, pulseValue); // Green
-          }
-        }
-      } else {
-        // Normal dark room effect - slower pulsing red/green
-        uint8_t timeValue = millis()/10;
-        for (int i = 0; i < NUM_LEDS; i++) {
-          if (sin8(timeValue + i*20) > 200) {
-            leds[i] = CRGB::Red;
-          } else if (sin8(timeValue + i*20) < 50) {
-            leds[i] = CRGB::Green;
-          } else {
-            leds[i] = CRGB::Gold;
-          }
-        }
-      }
-      break;
-      
-    case LIGHT_MEDIUM:
-      // Medium brightness effect - Christmas colors gradient
-      for(int i = 0; i < NUM_LEDS; i++) {
-        // Create a nice red-green-gold gradient for medium lighting
-        uint8_t pos = (ldrHue + i * 5) % 255;
-        if (pos < 85) {
-          leds[i] = CRGB::Red;
-        } else if (pos < 170) {
-          leds[i] = CRGB::Green;
-        } else {
-          leds[i] = CRGB::Gold;
-        }
-      }
-      break;
-      
-    case LIGHT_BRIGHT:
-      // Bright room effect - more subtle Christmas colors
-      for(int i = 0; i < NUM_LEDS; i++) {
-        // Softer colors for bright conditions
-        uint8_t pos = (ldrHue + i * 10) % 255;
-        if (pos < 85) {
-          leds[i] = CRGB(150, 0, 0); // Darker red
-        } else if (pos < 170) {
-          leds[i] = CRGB(0, 150, 0); // Darker green
-        } else {
-          leds[i] = CRGB(100, 80, 0); // Darker gold
-        }
-      }
-      break;
+  WiFi.mode(WIFI_STA);  // Set WiFi to station mode
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+    delay(1000);
+    Serial.print(".");
+    Serial.print(" Status: ");
+    Serial.print(WiFi.status());
+    attempts++;
   }
   
-  // Update the hue slowly over time for some variation
-  if (millis() - lastLdrHueUpdate > 100) {
-    lastLdrHueUpdate = millis();
-    ldrHue++;
-  }
-}
-
-void checkButtons() {
-  bool reading1 = digitalRead(BUTTON1);
-  bool reading2 = digitalRead(BUTTON2);
-
-  // Debounce logic
-  if (reading1 != lastButton1State || reading2 != lastButton2State) {
-    lastDebounceTime = millis();
-  }
-
-  if ((millis() - lastDebounceTime) > debounceDelay) {
-    // Button 1 - Control Songs
-    if (reading1 != button1State) {
-      button1State = reading1;
-      if (button1State == LOW) {
-        if (songState == IDLE) {
-          // If not playing, start the current song
-          startChristmasSong(currentSong);
-        } else {
-          // If already playing, stop the current song and start the next one
-          stopSong();
-          currentSong = (currentSong + 1) % NUM_SONGS;
-          startChristmasSong(currentSong);
-        }
-      }
-    }
-
-    // Button 2 - Change LED patterns
-    if (reading2 != button2State) {
-      button2State = reading2;
-      if (button2State == LOW) {
-        // If we're in a static color mode, increment the color
-        if (currentMode == STATIC_COLOR) {
-          currentColorIndex = (currentColorIndex + 1) % NUM_COLORS;
-          if (currentColorIndex == NUM_COLORS - 1) {  // After going through all colors
-            // Switch to first pattern mode
-            currentMode = RAINBOW_MODE;
-            Serial.println("Mode changed to RAINBOW");
-          } else {
-            Serial.print("Color changed to index: ");
-            Serial.println(currentColorIndex);
-          }
-        } else {
-          // If we're in a pattern mode, switch to the next pattern
-          currentMode = (DisplayMode)((int)currentMode + 1);
-          if (currentMode > LDR_REACTIVE_MODE) {  // After the last pattern
-            currentMode = STATIC_COLOR;   // Reset to static color mode
-            currentColorIndex = 0;        // Reset to first color
-            Serial.println("Mode reset to STATIC_COLOR");
-          } else {
-            Serial.print("Mode changed to: ");
-            Serial.println(currentMode);
-          }
-        }
-        updateDisplay();  // Update display based on new mode
-      }
-    }
-  }
-
-  lastButton1State = reading1;
-  lastButton2State = reading2;
-}
-
-void checkBothButtons() {
-  bool btn1 = digitalRead(BUTTON1) == LOW;
-  bool btn2 = digitalRead(BUTTON2) == LOW;
-
-  if (btn1 && btn2) {
-    if (!bothButtonsPressed) {
-      bothButtonsPressed = true;
-      bothButtonsStartTime = millis();
-    } else if (millis() - bothButtonsStartTime >= BOTH_BUTTONS_HOLD_TIME) {
-      // Special mode - toggle Bluetooth LE
-      if (!bleEnabled) {
-        enableBluetooth();
-      } else {
-        disableBluetooth();
-      }
-      // Reset timer to avoid triggering multiple times
-      bothButtonsStartTime = millis();
-    }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println();
+    Serial.println("WiFi connected successfully!");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+    Serial.print("Signal strength (RSSI): ");
+    Serial.println(WiFi.RSSI());
+    wifiConnected = true;
   } else {
-    bothButtonsPressed = false;
-  }
-}
-
-void enableBluetooth() {
-  Serial.println("BLUETOOTH MODE ACTIVATED!");
-  Serial.println("BLE Device Name: christmas PCB");
-  
-  // Here you would add code to actually enable BLE
-  // This depends on which BLE library you're using
-  // For example:
-  // BLEDevice::init("christmas PCB");
-  
-  bleEnabled = true;
-  
-  // Visual indication that BLE is enabled
-  for (int i = 0; i < 3; i++) {
-    fill_solid(leds, NUM_LEDS, CRGB::Blue);
-    FastLED.show();
-    delay(300);
-    fill_solid(leds, NUM_LEDS, CRGB::Black);
-    FastLED.show();
-    delay(300);
-  }
-  
-  // Restore display
-  updateDisplay();
-}
-
-void disableBluetooth() {
-  Serial.println("BLUETOOTH MODE DEACTIVATED!");
-  
-  // Here you would add code to disable BLE
-  // This depends on which BLE library you're using
-  // For example:
-  // BLEDevice::deinit();
-  
-  bleEnabled = false;
-  
-  // Visual indication that BLE is disabled
-  for (int i = 0; i < 3; i++) {
-    fill_solid(leds, NUM_LEDS, CRGB::Red);
-    FastLED.show();
-    delay(300);
-    fill_solid(leds, NUM_LEDS, CRGB::Black);
-    FastLED.show();
-    delay(300);
-  }
-  
-  // Restore display
-  updateDisplay();
-}
-
-void updatePatterns() {
-  unsigned long currentTime = millis();
-  
-  // Only update patterns if we're in IDLE state (not playing music)
-  if (songState != IDLE) return;
-  
-  // Set the appropriate update interval based on current mode
-  switch (currentMode) {
-    case RAINBOW_MODE:
-      patternUpdateInterval = RAINBOW_SPEED;
-      break;
-    case SNAKE_MODE:
-      patternUpdateInterval = SNAKE_SPEED;
-      break;
-    case CHASE_MODE:
-      patternUpdateInterval = CHASE_SPEED;
-      break;
-    case WAVE_MODE:
-      patternUpdateInterval = WAVE_SPEED;
-      break;
-    case BREATHE_MODE:
-      patternUpdateInterval = BREATHE_SPEED;
-      break;
-    case CHRISTMAS_TWINKLE:
-      patternUpdateInterval = TWINKLE_SPEED;
-      break;
-    case RANDOM_BLINK:
-      // Random blink uses its own timing mechanism
-      break;
-    case LDR_REACTIVE_MODE:
-      // LDR reactive mode is handled in checkLDR()
-      return;
-    default:
-      patternUpdateInterval = 50; // Default for other modes
-      break;
-  }
-  
-  // Update based on current pattern mode
-  if (currentTime - lastPatternUpdate >= patternUpdateInterval) {
-    lastPatternUpdate = currentTime;
+    Serial.println();
+    Serial.println("Failed to connect to WiFi!");
+    Serial.print("WiFi Status: ");
+    Serial.println(WiFi.status());
     
-    switch (currentMode) {
-      case STATIC_COLOR:
-        // Static color is set by updateDisplay(), no animation updates needed
+    // Print common status codes
+    switch(WiFi.status()) {
+      case WL_NO_SSID_AVAIL:
+        Serial.println("Error: SSID not found");
         break;
-        
-      case RAINBOW_MODE:
-        updateRainbowPattern();
+      case WL_CONNECT_FAILED:
+        Serial.println("Error: Connection failed (wrong password or other issue)");
         break;
-        
-      case SNAKE_MODE:
-        updateSnakePattern();
+      case WL_CONNECTION_LOST:
+        Serial.println("Error: Connection lost");
         break;
-        
-      case RANDOM_BLINK:
-        updateRandomBlinkPattern(currentTime);
+      case WL_DISCONNECTED:
+        Serial.println("Error: Disconnected");
         break;
-        
-      case CHASE_MODE:
-        updateChasePattern();
-        break;
-        
-      case BREATHE_MODE:
-        updateBreathePattern();
-        break;
-        
-      case WAVE_MODE:
-        updateWavePattern();
-        break;
-        
-      case CHRISTMAS_TWINKLE:
-        updateChristmasTwinkle();
-        break;
-        
-      case OFF_MODE:
-        turnOffAllLEDs();
-        break;
+      default:
+        Serial.println("Error: Unknown WiFi error");
     }
-  }
-}
-
-void updateRainbowPattern() {
-  // Simple rainbow pattern that cycles through the color wheel
-  // Slowed down color transition
-  colorFadeHue++;  // Increment by 1 for a slower color change
-  
-  for (int i = 0; i < NUM_LEDS; i++) {
-    leds[i] = CHSV(colorFadeHue + (i * 255 / NUM_LEDS), 255, 255);
-  }
-}
-
-void updateSnakePattern() {
-  // Snake pattern - a moving segment of LEDs
-  turnOffAllLEDs();  // Clear all LEDs
-  
-  // Update snake head position
-  snakeHeadPos = (snakeHeadPos + 1) % NUM_LEDS;
-  snakeHue += 1;  // Slower color change for snake
-  
-  // Draw the snake body - Christmas colors
-  for (int i = 0; i < snakeLength; i++) {
-    int pos = (snakeHeadPos - i + NUM_LEDS) % NUM_LEDS;  // Ensure positive wrap-around
-    // Fade the brightness based on distance from head
-    int brightness = 255 - (i * 255 / snakeLength);
     
-    // Christmas red and green alternating
-    if ((snakeHue / 20) % 2 == 0) {
-      leds[pos] = CRGB(brightness, 0, 0); // Red
+    // Try to scan for available networks
+    Serial.println("Scanning for available networks...");
+    int n = WiFi.scanNetworks();
+    if (n == 0) {
+      Serial.println("No networks found");
     } else {
-      leds[pos] = CRGB(0, brightness, 0); // Green
+      Serial.print(n);
+      Serial.println(" networks found:");
+      for (int i = 0; i < n; ++i) {
+        Serial.print(i + 1);
+        Serial.print(": ");
+        Serial.print(WiFi.SSID(i));
+        Serial.print(" (");
+        Serial.print(WiFi.RSSI(i));
+        Serial.print(")");
+        Serial.println((WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*");
+      }
     }
+    wifiConnected = false;
   }
 }
 
-void updateRandomBlinkPattern(unsigned long currentTime) {
-  // Random LEDs turn on and off
-  if (currentTime - lastRandomUpdate >= randomBlinkInterval) {
-    lastRandomUpdate = currentTime;
+void setupWebServer() {
+  // Only start web server if WiFi is connected
+  if (WiFi.status() == WL_CONNECTED) {
+    server.on("/", handleRoot);
+    server.on("/api/data", handleAPI);
+    server.on("/api/setspeed", HTTP_POST, handleSetSpeed);
+    server.on("/api/toggle", HTTP_POST, handleToggleFans);  // Toggle endpoint
+    server.on("/api/toggletimer", HTTP_POST, handleToggleTimer); // Timer toggle endpoint
     
-    // Turn off old random LEDs
-    for (int i = 0; i < 3; i++) {
-      if (randomLEDs[i] < NUM_LEDS) {
-        leds[randomLEDs[i]] = CRGB::Black;
-      }
-    }
-    
-    // Generate new random LEDs with Christmas colors
-    for (int i = 0; i < 3; i++) {
-      randomLEDs[i] = random8(NUM_LEDS);
-      randomHues[i] = random8(3); // 0, 1, or 2
-      
-      // Christmas color scheme
-      if (randomHues[i] == 0) {
-        leds[randomLEDs[i]] = CRGB::Red;
-      } else if (randomHues[i] == 1) {
-        leds[randomLEDs[i]] = CRGB::Green;
-      } else {
-        leds[randomLEDs[i]] = CRGB::Gold;
-      }
-    }
-  }
-}
-
-void updateChasePattern() {
-  // A chase pattern that runs around the LEDs
-  turnOffAllLEDs();
-  
-  // Christmas colors chase
-  int position = chasePos % NUM_LEDS;
-  
-  // Christmas Red, Green, or Gold
-  uint8_t colorChoice = (chasePos / 3) % 3;
-  
-  if (colorChoice == 0) {
-    leds[position] = CRGB::Red;
-  } else if (colorChoice == 1) {
-    leds[position] = CRGB::Green;
+    server.begin();
+    Serial.println("Web server started");
+    Serial.print("Access the web interface at: http://");
+    Serial.println(WiFi.localIP());
   } else {
-    leds[position] = CRGB::Gold;
-  }
-  
-  // Update position
-  chasePos = (chasePos + 1) % NUM_LEDS;
-}
-
-void updateBreathePattern() {
-  // Breathing effect - all LEDs fade in and out together
-  if (breatheIncreasing) {
-    breatheBrightness += 3;  // Slower increase
-    if (breatheBrightness >= 250) {
-      breatheIncreasing = false;
-    }
-  } else {
-    breatheBrightness -= 3;  // Slower decrease
-    if (breatheBrightness <= 5) {
-      breatheIncreasing = true;
-      colorFadeHue += 5;  // Change color slightly with each breath
-    }
-  }
-  
-  // Use fixed colors for Christmas - alternate between red and green
-  if ((colorFadeHue / 20) % 2 == 0) {
-    fill_solid(leds, NUM_LEDS, CRGB(breatheBrightness, 0, 0)); // Red
-  } else {
-    fill_solid(leds, NUM_LEDS, CRGB(0, breatheBrightness, 0)); // Green
-  }
-  
-  FastLED.setBrightness(255); // Override global brightness to allow full breathe effect
-}
-
-void updateWavePattern() {
-  // Wave pattern - a sine wave of color moving through the LEDs
-  waveOffset += 5;
-  
-  for (int i = 0; i < NUM_LEDS; i++) {
-    // Creating a wave effect through the LEDs with Christmas colors
-    uint8_t sinBrightness = sin8(waveOffset + (i * 255 / NUM_LEDS));
-    
-    // Use different colors for different parts of the strip
-    if (i < NUM_LEDS/3) {
-      leds[i] = CRGB(sinBrightness, 0, 0); // Red wave
-    } 
-    else if (i < 2*NUM_LEDS/3) {
-      leds[i] = CRGB(0, sinBrightness, 0); // Green wave
-    }
-    else {
-      leds[i] = CRGB(sinBrightness, sinBrightness/2, 0); // Gold-ish wave
-    }
+    Serial.println("Web server NOT started - WiFi not connected");
   }
 }
 
-void updateChristmasTwinkle() {
-  // Christmas twinkle effect - random LEDs twinkle like Christmas lights
-  // Fade all LEDs slightly
-  for (int i = 0; i < NUM_LEDS; i++) {
-    leds[i].fadeToBlackBy(10);
-  }
-  
-  // Randomly light up LEDs with Christmas colors
-  if (random8(3) == 0) {
-    int pos = random8(NUM_LEDS);
-    int colorChoice = random8(3);
-    
-    if (colorChoice == 0) {
-      leds[pos] = CRGB::Red;
-    } else if (colorChoice == 1) {
-      leds[pos] = CRGB::Green;
-    } else {
-      leds[pos] = CRGB::Gold;
-    }
-  }
-}
-
-void turnOffAllLEDs() {
-  fill_solid(leds, NUM_LEDS, CRGB::Black);
-}
-
-void updateDisplay() {
-  // Reset any ongoing animations when changing modes
-  if (songState == COLOR_FADING || songState == CONFETTI_MODE) {
-    songState = IDLE;
-  }
-
-  // Clear all LEDs first
-  turnOffAllLEDs();
-  
-  // Then set the display according to current mode
-  switch (currentMode) {
-    case STATIC_COLOR:
-      fill_solid(leds, NUM_LEDS, colorOptions[currentColorIndex]);
-      break;
-      
-    case RAINBOW_MODE:
-      // Will be handled by updatePatterns
-      break;
-      
-    case SNAKE_MODE:
-      // Initialize snake pattern
-      snakeHeadPos = 0;
-      snakeHue = random8();
-      break;
-      
-    case RANDOM_BLINK:
-      // Initialize random blink
-      for (int i = 0; i < 3; i++) {
-        randomLEDs[i] = random8(NUM_LEDS);
-        randomHues[i] = random8();
-      }
-      break;
-      
-    case CHASE_MODE:
-      // Initialize chase pattern
-      chasePos = 0;
-      chaseHue = random8();
-      break;
-      
-    case BREATHE_MODE:
-      // Initialize breathe pattern
-      breatheBrightness = 0;
-      breatheIncreasing = true;
-      colorFadeHue = random8();
-      break;
-      
-    case WAVE_MODE:
-      // Initialize wave pattern
-      waveOffset = 0;
-      colorFadeHue = random8();
-      break;
-      
-    case CHRISTMAS_TWINKLE:
-      // Initialize Christmas twinkle
-      break;
-      
-    case OFF_MODE:
-      // All LEDs off, already handled by turnOffAllLEDs()
-      break;
-      
-    case LDR_REACTIVE_MODE:
-      // Initialize LDR reactive mode
-      ldrHue = random8();
-      break;
-  }
-  
-  // Make sure to reset the brightness to the current LDR value
-  if (currentMode != BREATHE_MODE) {
-    FastLED.setBrightness(brightness);
-  }
-}
-
-void startChristmasSong(int songIndex) {
-  currentNote = 0;
-  ledsLit = 0;
-  
-  // Set which Christmas song to play based on the index
-  switch (songIndex) {
-    case 0:
-      songState = PLAYING_JINGLE_BELLS;
-      Serial.println("Starting Jingle Bells");
-      break;
-    case 1:
-      songState = PLAYING_WISH;
-      Serial.println("Starting We Wish You a Merry Christmas");
-      break;
-    case 2:
-      songState = PLAYING_SANTA;
-      Serial.println("Starting Santa Claus is Coming to Town");
-      break;
-  }
-  
-  previousNoteTime = millis();
-  noteIsPlaying = false;
-  
-  // If not in static color mode, select a random color for the song
-  if (currentMode != STATIC_COLOR) {
-    currentColorIndex = random8(NUM_COLORS - 1); // Avoid the last color (black)
-    Serial.print("Selected random color for song: ");
-    Serial.println(currentColorIndex);
-  }
-}
-
-void stopSong() {
-  songState = IDLE;
-  noTone(BUZZER);
-  updateDisplay();
-  Serial.println("Song stopped");
-}
-
-void updateColorFade() {
-  unsigned long currentTime = millis();
-
-  if (currentTime - lastColorFadeUpdate >= colorFadeUpdateInterval) {
-    lastColorFadeUpdate = currentTime;
-    colorFadeHue++;
-
-    for (int i = 0; i < NUM_LEDS; i++) {
-      // Use only red and green for Christmas color fading
-      uint8_t hue = (colorFadeHue + (i * 128 / NUM_LEDS)) % 255;
-      if (hue < 128) {
-        // Red to yellow range
-        uint8_t greenVal = map(hue, 0, 127, 0, 255);
-        leds[i] = CRGB(255, greenVal, 0);
-      } else {
-        // Yellow to green range
-        uint8_t redVal = map(hue, 128, 255, 255, 0);
-        leds[i] = CRGB(redVal, 255, 0);
-      }
-    }
-  }
-}
-
-void updateConfettiMode() {
-  // Add new confetti in Christmas colors
-  if (random8() < CONFETTI_SPAWN_RATE) {
-    int pos = random16(NUM_LEDS);
-    int colorChoice = random8(3);
-    
-    if (colorChoice == 0) {
-      leds[pos] = CRGB::Red;
-    } else if (colorChoice == 1) {
-      leds[pos] = CRGB::Green;
-    } else {
-      leds[pos] = CRGB::Gold;
-    }
-  }
-
-  // Fade out
-  fadeToBlackBy(leds, NUM_LEDS, CONFETTI_FADE_RATE);
-
-  // Check duration
-  if (millis() - confettiStartTime > CONFETTI_DURATION) {
-    songState = IDLE;
-    updateDisplay();
-    Serial.println("Confetti mode ended");
-  }
-}
-
-void updateSong() {
-  unsigned long currentTime = millis();
-
-  switch (songState) {
-    case IDLE:
-      break;
-
-    case PLAYING_JINGLE_BELLS:
-      if (!noteIsPlaying && currentTime >= previousNoteTime) {
-        if (currentNote < jingleBellsLength) {
-          // Play note
-          noteDuration = (1000 / jingleBellsTempo[currentNote]);
-          pauseDuration = noteDuration * 0.3;
-          tone(BUZZER, jingleBells[currentNote], noteDuration);
-
-          // Light LEDs progressively based on song progress
-          float ledsPerNote = (float)(NUM_LEDS) / jingleBellsLength;
-          int targetLEDs = round((currentNote + 1) * ledsPerNote);
-
-          while (ledsLit < targetLEDs && ledsLit < NUM_LEDS) {
-            // Christmas color pattern
-            if (ledsLit % 3 == 0) {
-              leds[ledsLit] = CRGB::Red;
-            } else if (ledsLit % 3 == 1) {
-              leds[ledsLit] = CRGB::Green;
-            } else {
-              leds[ledsLit] = CRGB::Gold;
+void handleRoot() {
+  String html = R"(
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fan Controller</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 0;
+            padding: 10px; 
+            background-color: #1a1a1a; 
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            background: #2d2d2d; 
+            padding: 15px; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 20px rgba(0,0,0,0.5); 
+            border: 1px solid #404040;
+        }
+        .sensor-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); 
+            gap: 15px; 
+            margin-bottom: 20px; 
+        }
+        .sensor-card { 
+            background: #3a3a3a; 
+            padding: 15px; 
+            border-radius: 8px; 
+            border: 1px solid #505050;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            min-height: 120px;
+        }
+        .controls-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 15px;
+        }
+        .fan-control { 
+            background: #2a3f5f; 
+            padding: 15px; 
+            border-radius: 8px; 
+            border: 1px solid #4a6fa5;
+        }
+        .toggle-container {
+            background: #4a2a2a;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #8a4a4a;
+            text-align: center;
+        }
+        .toggle-btn {
+            background: #d32f2f;
+            color: white;
+            border: none;
+            padding: 15px 25px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            min-width: 150px;
+            margin: 5px;
+            touch-action: manipulation;
+            user-select: none;
+        }
+        .toggle-btn:hover, .toggle-btn:active {
+            background: #b71c1c;
+            transform: scale(0.98);
+        }
+        .toggle-btn.enabled {
+            background: #388e3c;
+        }
+        .toggle-btn.enabled:hover, .toggle-btn.enabled:active {
+            background: #2e7d32;
+        }
+        .slider-container { 
+            margin: 15px 0; 
+        }
+        .slider { 
+            width: 100%; 
+            height: 35px; 
+            border-radius: 8px; 
+            background: #555; 
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            background: #2196F3;
+            cursor: pointer;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+            transition: all 0.2s;
+        }
+        .slider::-webkit-slider-thumb:active {
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(33, 150, 243, 0.4);
+        }
+        .slider::-moz-range-thumb {
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            background: #2196F3;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+        }
+        .status { 
+            background: linear-gradient(135deg, #4a4a1a, #5a5a2a); 
+            padding: 15px; 
+            border-radius: 12px; 
+            margin-bottom: 20px;
+            border: 1px solid #6a6a2a;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .timer-display {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            gap: 15px;
+            align-items: center;
+            margin: 15px 0;
+        }
+        .time-box {
+            background: rgba(0,0,0,0.3);
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            min-height: 60px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .time-label {
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        .time-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+        }
+        .progress-container {
+            text-align: center;
+        }
+        .progress-circle {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: conic-gradient(#2196F3 0deg, #555 0deg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 10px;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+        .progress-inner {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: #2d2d2d;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: bold;
+            color: #2196F3;
+        }
+        .timer-toggle {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            touch-action: manipulation;
+            user-select: none;
+        }
+        .timer-toggle:hover, .timer-toggle:active {
+            background: #1976D2;
+            transform: scale(0.98);
+        }
+        .timer-toggle.disabled {
+            background: #666;
+        }
+        .timer-toggle.disabled:hover, .timer-toggle.disabled:active {
+            background: #555;
+        }
+        .value { 
+            font-size: 22px; 
+            font-weight: bold; 
+            color: #64B5F6; 
+            margin: 5px 0;
+        }
+        .label { 
+            font-size: 13px; 
+            color: #b0b0b0; 
+            margin-bottom: 5px;
+        }
+        h1 { 
+            color: #f0f0f0; 
+            text-align: center;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            margin: 10px 0 20px 0;
+            font-size: 24px;
+        }
+        h2 { 
+            color: #d0d0d0; 
+            margin: 0 0 15px 0; 
+            font-size: 18px;
+        }
+        label {
+            color: #e0e0e0;
+            font-weight: 500;
+            font-size: 14px;
+            display: block;
+            margin-bottom: 8px;
+        }
+        
+        /* Mobile Specific Styles */
+        @media (max-width: 768px) {
+            body {
+                padding: 5px;
             }
-            ledsLit++;
-          }
-
-          noteEndTime = currentTime + noteDuration;
-          noteIsPlaying = true;
-        } else {
-          // Song complete, transition to color fading
-          songState = COLOR_FADING;
-          colorFadeHue = 0;
-          lastColorFadeUpdate = currentTime;
-          Serial.println("Jingle Bells complete, starting color fade");
-        }
-      } else if (noteIsPlaying && currentTime >= noteEndTime) {
-        noteIsPlaying = false;
-        currentNote++;
-        previousNoteTime = currentTime + pauseDuration;
-      }
-      break;
-
-    case PLAYING_WISH:
-      if (!noteIsPlaying && currentTime >= previousNoteTime) {
-        if (currentNote < wishLength) {
-          // Play note
-          noteDuration = (1000 / wishTempo[currentNote]);
-          pauseDuration = noteDuration * 0.3;
-          tone(BUZZER, wishMelody[currentNote], noteDuration);
-
-          // Light LEDs progressively based on song progress
-          float ledsPerNote = (float)(NUM_LEDS) / wishLength;
-          int targetLEDs = round((currentNote + 1) * ledsPerNote);
-
-          while (ledsLit < targetLEDs && ledsLit < NUM_LEDS) {
-            // Christmas color pattern
-            if (ledsLit % 3 == 0) {
-              leds[ledsLit] = CRGB::Red;
-            } else if (ledsLit % 3 == 1) {
-              leds[ledsLit] = CRGB::Green;
-            } else {
-              leds[ledsLit] = CRGB::Gold;
+            .container {
+                padding: 12px;
             }
-            ledsLit++;
-          }
-
-          noteEndTime = currentTime + noteDuration;
-          noteIsPlaying = true;
-        } else {
-          // Song complete, transition to color fading
-          songState = COLOR_FADING;
-          colorFadeHue = 0;
-          lastColorFadeUpdate = currentTime;
-          Serial.println("We Wish You a Merry Christmas complete, starting color fade");
-        }
-      } else if (noteIsPlaying && currentTime >= noteEndTime) {
-        noteIsPlaying = false;
-        currentNote++;
-        previousNoteTime = currentTime + pauseDuration;
-      }
-      break;
-
-    case PLAYING_SANTA:
-      if (!noteIsPlaying && currentTime >= previousNoteTime) {
-        if (currentNote < santaLength) {
-          // Play note
-          noteDuration = (900 / santaTempo[currentNote]); // Note using 900 here for slightly faster tempo
-          pauseDuration = noteDuration * 0.3;
-          tone(BUZZER, santaMelody[currentNote], noteDuration);
-
-          // Light LEDs progressively based on song progress
-          float ledsPerNote = (float)(NUM_LEDS) / santaLength;
-          int targetLEDs = round((currentNote + 1) * ledsPerNote);
-
-          while (ledsLit < targetLEDs && ledsLit < NUM_LEDS) {
-            // Christmas color pattern
-            if (ledsLit % 3 == 0) {
-              leds[ledsLit] = CRGB::Red;
-            } else if (ledsLit % 3 == 1) {
-              leds[ledsLit] = CRGB::Green;
-            } else {
-              leds[ledsLit] = CRGB::White;
+            .sensor-grid {
+                grid-template-columns: 1fr;
+                gap: 12px;
             }
-            ledsLit++;
-          }
-
-          noteEndTime = currentTime + noteDuration;
-          noteIsPlaying = true;
-        } else {
-          // Song complete, transition to color fading
-          songState = COLOR_FADING;
-          colorFadeHue = 0;
-          lastColorFadeUpdate = currentTime;
-          Serial.println("Santa Claus is Coming to Town complete, starting color fade");
+            .timer-display {
+                grid-template-columns: 1fr;
+                gap: 12px;
+                text-align: center;
+            }
+            .time-box {
+                padding: 15px;
+            }
+            .time-value {
+                font-size: 20px;
+            }
+            .progress-circle {
+                width: 90px;
+                height: 90px;
+                margin: 10px auto;
+            }
+            .progress-inner {
+                width: 70px;
+                height: 70px;
+                font-size: 14px;
+            }
+            h1 {
+                font-size: 20px;
+                margin: 5px 0 15px 0;
+            }
+            h2 {
+                font-size: 16px;
+            }
+            .value {
+                font-size: 24px;
+            }
+            .toggle-btn {
+                width: 100%;
+                max-width: 300px;
+                padding: 18px 25px;
+                font-size: 18px;
+                margin: 8px auto;
+                display: block;
+            }
+            .timer-toggle {
+                padding: 12px 20px;
+                font-size: 14px;
+            }
+            .slider {
+                height: 40px;
+            }
+            .slider::-webkit-slider-thumb {
+                width: 40px;
+                height: 40px;
+            }
+            .slider::-moz-range-thumb {
+                width: 40px;
+                height: 40px;
+            }
         }
-      } else if (noteIsPlaying && currentTime >= noteEndTime) {
-        noteIsPlaying = false;
-        currentNote++;
-        previousNoteTime = currentTime + pauseDuration;
-      }
-      break;
+        
+        /* Large Screen Optimization */
+        @media (min-width: 1024px) {
+            .controls-grid {
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+            }
+            .sensor-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .timer-display {
+                gap: 30px;
+            }
+            .progress-circle {
+                width: 100px;
+                height: 100px;
+            }
+            .progress-inner {
+                width: 80px;
+                height: 80px;
+                font-size: 16px;
+            }
+        }
+        
+        /* Touch-friendly hover states */
+        @media (hover: none) {
+            .toggle-btn:hover {
+                background: #d32f2f;
+                transform: none;
+            }
+            .toggle-btn.enabled:hover {
+                background: #388e3c;
+            }
+            .timer-toggle:hover {
+                background: #2196F3;
+                transform: none;
+            }
+            .timer-toggle.disabled:hover {
+                background: #666;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Fan Controller Dashboard</h1>
+        
+        <div class="status">
+            <h2>System Status</h2>
+            <div class="timer-display">
+                <div class="time-box">
+                    <div class="time-label">ELAPSED</div>
+                    <div class="time-value" id="elapsed-time">00:00:00</div>
+                </div>
+                <div class="progress-container">
+                    <div class="progress-circle" id="progress-circle">
+                        <div class="progress-inner" id="progress-text">0%</div>
+                    </div>
+                    <button id="timer-toggle" class="timer-toggle">TIMER ENABLED</button>
+                </div>
+                <div class="time-box">
+                    <div class="time-label">REMAINING</div>
+                    <div class="time-value" id="remaining-time">08:00:00</div>
+                </div>
+            </div>
+        </div>
 
-    case COLOR_FADING:
-      // Handled in main loop
-      break;
+        <div class="sensor-grid">
+            <div class="sensor-card">
+                <h2>Sensor 1</h2>
+                <div class="label">Temperature</div>
+                <div class="value" id="temp1">--&deg;C</div>
+                <div class="label">Humidity</div>
+                <div class="value" id="hum1">--%</div>
+            </div>
+            
+            <div class="sensor-card">
+                <h2>Sensor 2</h2>
+                <div class="label">Temperature</div>
+                <div class="value" id="temp2">--&deg;C</div>
+                <div class="label">Humidity</div>
+                <div class="value" id="hum2">--%</div>
+            </div>
+        </div>
 
-    case CONFETTI_MODE:
-      // Handled in main loop
-      break;
+        <div class="controls-grid">
+            <div class="toggle-container">
+                <h2>Fan Control</h2>
+                <button id="fan-toggle" class="toggle-btn enabled">FANS ENABLED</button>
+            </div>
 
-    case ENDING:
-      songState = IDLE;
-      updateDisplay();
-      break;
+            <div class="fan-control">
+                <h2>Fan Speed Control</h2>
+                <div class="slider-container">
+                    <label for="fan1">Fan 1 Speed: <span id="fan1-value">0</span>%</label>
+                    <input type="range" id="fan1" class="slider" min="112" max="255" value="220">
+                </div>
+                <div class="slider-container">
+                    <label for="fan2">Fan 2 Speed: <span id="fan2-value">0</span>%</label>
+                    <input type="range" id="fan2" class="slider" min="112" max="255" value="220">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function updateData() {
+            fetch('/api/data')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('temp1').innerHTML = data.temp1.toFixed(1) + '&deg;C';
+                    document.getElementById('hum1').textContent = data.hum1.toFixed(1) + '%';
+                    document.getElementById('temp2').innerHTML = data.temp2.toFixed(1) + '&deg;C';
+                    document.getElementById('hum2').textContent = data.hum2.toFixed(1) + '%';
+                    
+                    // Update timer display
+                    updateTimerDisplay(data);
+                    
+                    // Update fan toggle button
+                    const toggleBtn = document.getElementById('fan-toggle');
+                    if (data.fansEnabled) {
+                        toggleBtn.textContent = 'FANS ENABLED';
+                        toggleBtn.className = 'toggle-btn enabled';
+                    } else {
+                        toggleBtn.textContent = 'FANS DISABLED';
+                        toggleBtn.className = 'toggle-btn';
+                    }
+                    
+                    // Update timer toggle button
+                    const timerBtn = document.getElementById('timer-toggle');
+                    if (data.autoTimerEnabled) {
+                        timerBtn.textContent = 'TIMER ENABLED';
+                        timerBtn.className = 'timer-toggle';
+                    } else {
+                        timerBtn.textContent = 'TIMER DISABLED';
+                        timerBtn.className = 'timer-toggle disabled';
+                    }
+                    
+                    // Update fan speed sliders if they haven't been changed by user
+                    if (!document.getElementById('fan1').matches(':focus')) {
+                        document.getElementById('fan1').value = Math.max(112, data.fan1Speed);
+                    }
+                    if (!document.getElementById('fan2').matches(':focus')) {
+                        document.getElementById('fan2').value = Math.max(112, data.fan2Speed);
+                    }
+                    
+                    updateFanSpeedDisplay();
+                })
+                .catch(error => console.error('Error:', error));
+        }
+
+        function updateFanSpeedDisplay() {
+            const fan1Value = document.getElementById('fan1').value;
+            const fan2Value = document.getElementById('fan2').value;
+            // Convert PWM (112-255) to percentage (44-100%)
+            document.getElementById('fan1-value').textContent = Math.round(((fan1Value - 112) / (255 - 112)) * 56 + 44);
+            document.getElementById('fan2-value').textContent = Math.round(((fan2Value - 112) / (255 - 112)) * 56 + 44);
+        }
+
+        function setFanSpeed(fan, speed) {
+            fetch('/api/setspeed', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    fan: fan,
+                    speed: parseInt(speed)
+                })
+            });
+        }
+
+        function toggleFans() {
+            fetch('/api/toggle', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({})
+            });
+        }
+
+        function toggleTimer() {
+            fetch('/api/toggletimer', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({})
+            });
+        }
+
+        function updateTimerDisplay(data) {
+            // Update elapsed and remaining time
+            document.getElementById('elapsed-time').textContent = data.elapsedFormatted;
+            if (data.autoTimerEnabled) {
+                document.getElementById('remaining-time').textContent = data.remainingFormatted;
+            } else {
+                document.getElementById('remaining-time').textContent = 'DISABLED';
+            }
+            
+            // Update progress circle
+            const progressCircle = document.getElementById('progress-circle');
+            const progressText = document.getElementById('progress-text');
+            const percentage = data.autoTimerEnabled ? data.percentComplete : 0;
+            
+            const degrees = (percentage / 100) * 360;
+            progressCircle.style.background = `conic-gradient(#2196F3 ${degrees}deg, #555 ${degrees}deg)`;
+            progressText.textContent = Math.round(percentage) + '%';
+        }
+
+        // Event listeners
+        document.getElementById('fan1').addEventListener('input', function() {
+            updateFanSpeedDisplay();
+            setFanSpeed(1, this.value);
+        });
+
+        document.getElementById('fan2').addEventListener('input', function() {
+            updateFanSpeedDisplay();
+            setFanSpeed(2, this.value);
+        });
+
+        document.getElementById('fan-toggle').addEventListener('click', function() {
+            toggleFans();
+        });
+
+        document.getElementById('timer-toggle').addEventListener('click', function() {
+            toggleTimer();
+        });
+
+        // Initial load and periodic updates
+        updateData();
+        setInterval(updateData, 2000);
+        updateFanSpeedDisplay();
+    </script>
+</body>
+</html>
+)";
+  
+  server.send(200, "text/html", html);
+}
+
+void handleAPI() {
+  unsigned long currentTime = millis();
+  unsigned long elapsedTime = currentTime - startTime;
+  unsigned long remainingTime = RUNTIME_MS - elapsedTime;
+  
+  // Format elapsed time
+  unsigned long hoursElapsed = elapsedTime / 3600000;
+  unsigned long minutesElapsed = (elapsedTime % 3600000) / 60000;
+  unsigned long secondsElapsed = (elapsedTime % 60000) / 1000;
+  
+  // Format remaining time
+  unsigned long hoursRemaining = remainingTime / 3600000;
+  unsigned long minutesRemaining = (remainingTime % 3600000) / 60000;
+  unsigned long secondsRemaining = (remainingTime % 60000) / 1000;
+  
+  String status = String("Elapsed: ") + 
+                  String(hoursElapsed) + ":" + 
+                  String(minutesElapsed) + ":" + 
+                  String(secondsElapsed) + 
+                  " | Remaining: " + 
+                  String(hoursRemaining) + ":" + 
+                  String(minutesRemaining) + ":" + 
+                  String(secondsRemaining);
+
+  // Format time strings for display
+  char elapsedStr[16];
+  char remainingStr[16];
+  snprintf(elapsedStr, sizeof(elapsedStr), "%02lu:%02lu:%02lu", hoursElapsed, minutesElapsed, secondsElapsed);
+  snprintf(remainingStr, sizeof(remainingStr), "%02lu:%02lu:%02lu", hoursRemaining, minutesRemaining, secondsRemaining);
+
+  JsonDocument doc;
+  doc["temp1"] = sensor1.readTemp();
+  doc["hum1"] = sensor1.readHumidity();
+  doc["temp2"] = sensor2.readTemp();
+  doc["hum2"] = sensor2.readHumidity();
+  doc["fan1Speed"] = fan1Speed;
+  doc["fan2Speed"] = fan2Speed;
+  doc["fansEnabled"] = fansEnabled;
+  doc["autoTimerEnabled"] = autoTimerEnabled;
+  doc["status"] = status;
+  doc["elapsedFormatted"] = elapsedStr;
+  doc["remainingFormatted"] = remainingStr;
+  doc["percentComplete"] = autoTimerEnabled ? (float)elapsedTime / RUNTIME_MS * 100.0 : 0.0;
+  
+  String response;
+  serializeJson(doc, response);
+  server.send(200, "application/json", response);
+}
+
+void handleSetSpeed() {
+  if (server.hasArg("plain")) {
+    JsonDocument doc;
+    deserializeJson(doc, server.arg("plain"));
+    
+    int fan = doc["fan"];
+    int speed = doc["speed"];
+    
+    // Constrain speed to valid range (minimum 44% = 112 PWM)
+    speed = constrain(speed, 112, 255);
+    
+    if (fan == 1) {
+      fan1Speed = speed;
+    } else if (fan == 2) {
+      fan2Speed = speed;
+    }
+    
+    // Update actual fan outputs
+    updateFanOutputs();
+    
+    // Flash LED to indicate command received
+    flashLED();
+    
+    // Mark settings as changed
+    settingsChanged = true;
+    lastSettingsChange = millis();
+    
+    Serial.printf("Fan %d speed set to %d\n", fan, speed);
+    
+    server.send(200, "text/plain", "OK");
+  } else {
+    server.send(400, "text/plain", "Bad Request");
+  }
+}
+
+void handleToggleFans() {
+  fansEnabled = !fansEnabled;
+  updateFanOutputs();
+  flashLED();
+  
+  // Mark settings as changed
+  settingsChanged = true;
+  lastSettingsChange = millis();
+  
+  Serial.printf("Fans %s\n", fansEnabled ? "ENABLED" : "DISABLED");
+  
+  server.send(200, "text/plain", "OK");
+}
+
+void handleToggleTimer() {
+  autoTimerEnabled = !autoTimerEnabled;
+  flashLED();
+  
+  // Mark settings as changed
+  settingsChanged = true;
+  lastSettingsChange = millis();
+  
+  Serial.printf("Auto Timer %s\n", autoTimerEnabled ? "ENABLED" : "DISABLED");
+  
+  server.send(200, "text/plain", "OK");
+}
+
+void loadSettings() {
+  uint16_t magic = EEPROM.readUShort(EEPROM_MAGIC_ADDR);
+  
+  if (magic == EEPROM_MAGIC_VALUE) {
+    // Valid settings found
+    fan1Speed = EEPROM.readUShort(EEPROM_FAN1_ADDR);
+    fan2Speed = EEPROM.readUShort(EEPROM_FAN2_ADDR);
+    fansEnabled = EEPROM.readBool(EEPROM_ENABLED_ADDR);
+    autoTimerEnabled = EEPROM.readBool(EEPROM_TIMER_ADDR);
+    
+    // Constrain to valid range (minimum 44% = 112 PWM)
+    fan1Speed = constrain(fan1Speed, 112, 255);
+    fan2Speed = constrain(fan2Speed, 112, 255);
+    
+    Serial.printf("Settings loaded from EEPROM: Fan1=%d, Fan2=%d, Enabled=%s, Timer=%s\n", 
+                  fan1Speed, fan2Speed, fansEnabled ? "Yes" : "No", autoTimerEnabled ? "Yes" : "No");
+  } else {
+    // No valid settings, use defaults
+    fan1Speed = 220;
+    fan2Speed = 220;
+    fansEnabled = true;
+    autoTimerEnabled = true;
+    Serial.println("No valid settings found, using defaults");
+  }
+}
+
+void saveSettings() {
+  EEPROM.writeUShort(EEPROM_FAN1_ADDR, fan1Speed);
+  EEPROM.writeUShort(EEPROM_FAN2_ADDR, fan2Speed);
+  EEPROM.writeBool(EEPROM_ENABLED_ADDR, fansEnabled);
+  EEPROM.writeBool(EEPROM_TIMER_ADDR, autoTimerEnabled);
+  EEPROM.writeUShort(EEPROM_MAGIC_ADDR, EEPROM_MAGIC_VALUE);
+  EEPROM.commit();
+  
+  Serial.printf("Settings saved to EEPROM: Fan1=%d, Fan2=%d, Enabled=%s, Timer=%s\n", 
+                fan1Speed, fan2Speed, fansEnabled ? "Yes" : "No", autoTimerEnabled ? "Yes" : "No");
+}
+
+void checkSettingsSave() {
+  if (settingsChanged && (millis() - lastSettingsChange >= SETTINGS_SAVE_DELAY)) {
+    saveSettings();
+    settingsChanged = false;
+  }
+}
+
+void updateLedBrightness(float percentComplete) {
+  if (percentComplete < DIMMING_START_PERCENT) {
+    ledcWrite(LED_PWM_CHANNEL, LED_START_BRIGHTNESS);
+    return;
+  }
+  float dimmingProgress = (percentComplete - DIMMING_START_PERCENT) / (100.0 - DIMMING_START_PERCENT);
+  dimmingProgress = fmax(0.0, fmin(1.0, dimmingProgress));
+  int brightness = LED_START_BRIGHTNESS - dimmingProgress * (LED_START_BRIGHTNESS - LED_END_BRIGHTNESS);
+  ledcWrite(LED_PWM_CHANNEL, brightness);
+}
+
+void kickWatchdog() {
+  digitalWrite(WATCHDOG_PIN, LOW);
+  delay(1);
+  digitalWrite(WATCHDOG_PIN, HIGH);
+}
+
+void reportStatus(unsigned long elapsedTime) {
+  unsigned long hoursElapsed = elapsedTime / 3600000;
+  unsigned long minutesElapsed = (elapsedTime % 3600000) / 60000;
+  unsigned long secondsElapsed = (elapsedTime % 60000) / 1000;
+  unsigned long remainingTime = RUNTIME_MS - elapsedTime;
+  unsigned long hoursRemaining = remainingTime / 3600000;
+  unsigned long minutesRemaining = (remainingTime % 3600000) / 60000;
+  unsigned long secondsRemaining = (remainingTime % 60000) / 1000;
+  
+  Serial.println("----------------------------------------------------------");
+  Serial.print("Elapsed Time: ");
+  Serial.printf("%02lu:%02lu:%02lu", hoursElapsed, minutesElapsed, secondsElapsed);
+  Serial.print(", Remaining Time: ");
+  Serial.printf("%02lu:%02lu:%02lu", hoursRemaining, minutesRemaining, secondsRemaining);
+  Serial.print(" (");
+  Serial.print((float)elapsedTime / RUNTIME_MS * 100.0);
+  Serial.println("%)");
+
+  Serial.println("Sensor 1:");
+  Serial.print("  Temperature: ");
+  Serial.print(sensor1.readTemp());
+  Serial.print(" C, Humidity: ");
+  Serial.println(sensor1.readHumidity());
+
+  Serial.println("Sensor 2:");
+  Serial.print("  Temperature: ");
+  Serial.print(sensor2.readTemp());
+  Serial.print(" C, Humidity: ");
+  Serial.println(sensor2.readHumidity());
+  
+  Serial.printf("Fan Speeds: Fan1=%d, Fan2=%d (Enabled: %s)\n", 
+                fan1Speed, fan2Speed, fansEnabled ? "Yes" : "No");
+  
+  // Show WiFi status
+  if (wifiConnected && WiFi.status() == WL_CONNECTED) {
+    Serial.print("WiFi: Connected (");
+    Serial.print(WiFi.localIP());
+    Serial.println(")");
+  } else {
+    Serial.println("WiFi: Disconnected");
+  }
+  
+  Serial.println("----------------------------------------------------------");
+
+  sensor1.triggerMeasurement();
+  sensor2.triggerMeasurement();
+}
+
+void flashLED() {
+  ledFlashing = true;
+  ledFlashStart = millis();
+  ledcWrite(LED_PWM_CHANNEL, 255);  // Full brightness flash
+}
+
+void updateFanOutputs() {
+  if (fansEnabled) {
+    ledcWrite(FAN_PWM_CHANNEL_1, fan1Speed);
+    ledcWrite(FAN_PWM_CHANNEL_2, fan2Speed);
+  } else {
+    ledcWrite(FAN_PWM_CHANNEL_1, 0);
+    ledcWrite(FAN_PWM_CHANNEL_2, 0);
   }
 }

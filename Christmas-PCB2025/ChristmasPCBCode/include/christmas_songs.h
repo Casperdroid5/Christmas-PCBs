@@ -1,3 +1,28 @@
+/*  The MIT License (MIT)
+
+    Copyright (c) 2015 Andy Tran
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+    THE SOFTWARE.
+
+    Christmas Songs Data
+*/
+
 #ifndef CHRISTMAS_SONGS_H
 #define CHRISTMAS_SONGS_H
 
@@ -7,126 +32,166 @@
 #define REST 0
 #endif
 
-// Christmas Songs Enum (only includes the songs in getSongData)
 enum ChristmasSong {
   JINGLE_BELLS,
   WE_WISH,
-  SANTA_CLAUS,
-  SILENT_NIGHT,
   RUDOLPH,
   LET_IT_SNOW,
-  ALL_I_WANT
+  ALL_I_WANT,
+  SILENT_NIGHT,
+  NUM_CHRISTMAS_SONGS
 };
 
-#define NUM_CHRISTMAS_SONGS 7
-
-// Song Names Array
 const char* songNames[] = {
   "Jingle Bells",
   "We Wish You a Merry Christmas",
-  "Santa Claus is Coming to Town",
-  "Silent Night",
   "Rudolph the Red-Nosed Reindeer",
   "Let It Snow! Let It Snow! Let It Snow!",
-  "All I Want for Christmas Is You"
+  "All I Want for Christmas Is You",
+  "Silent Night"
 };
 
-// ---
-// 1. Jingle Bells (Tempo Adjusted)
+// Structure to hold song data
+struct Song {
+  const int* melody;
+  const int* tempo;
+  int size;
+  int baseTempo;
+  const char* name;
+};
+
+// 1. Jingle Bells (Classic version)
 const int jingleBells_melody[] = {
-  NOTE_E5, NOTE_E5, NOTE_E5,
-  NOTE_E5, NOTE_E5, NOTE_E5,
-  NOTE_E5, NOTE_G5, NOTE_C5, NOTE_D5,
-  NOTE_E5,
-  NOTE_F5, NOTE_F5, NOTE_F5,
-  NOTE_F5, NOTE_E5, NOTE_E5, NOTE_E5, NOTE_E5,
-  NOTE_E5, NOTE_D5, NOTE_D5, NOTE_E5,
-  NOTE_D5, NOTE_G5
+  659, 659, 659, 659, 659, 659,
+  659, 784, 523, 587, 659,
+  698, 698, 698, 698, 698, 659, 659, 659,
+  659, 587, 587, 659, 587, 784
 };
 
 const int jingleBells_tempo[] = {
-  8, 8, 4,
-  8, 8, 4,
-  8, 8, 8, 8,
-  2,
-  8, 8, 8,
-  8, 8, 8, 16, 16,
-  8, 8, 8, 8,
-  4, 4
+  8, 8, 4, 8, 8, 4,
+  8, 8, 8, 8, 2,
+  8, 8, 8, 8, 8, 8, 16, 16,
+  8, 8, 8, 8, 4, 4
 };
 
-const int jingleBells_size = sizeof(jingleBells_melody) / sizeof(int);
-
-// ---
-// 2. We Wish You a Merry Christmas (Melody & Tempo Corrected)
+// 2. We Wish You a Merry Christmas (Classic version)
 const int weWish_melody[] = {
-  NOTE_G4, NOTE_C5, NOTE_C5, NOTE_D5, NOTE_C5, NOTE_B4,
-  NOTE_A4, REST,
-  NOTE_A4, NOTE_B4, NOTE_C5, NOTE_A4,
-  NOTE_G4, NOTE_G4, REST,
-  NOTE_G4, NOTE_A4, NOTE_G4, NOTE_F4, NOTE_E4,
-  NOTE_D4, REST,
-  NOTE_D4, NOTE_D4, NOTE_D4, NOTE_G4, NOTE_E4,
-  NOTE_F4,
-  REST, NOTE_F4
+  392, 392, 440, 392, 349, 330,
+  392, 392, 440, 392, 349, 330,
+  294, 294, 330, 294, 262,
+  392, 392, 440, 392, 349, 330,
+  392, 392, 440, 392, 349, 330,
+  294, 294, 330, 294, 262
 };
 
 const int weWish_tempo[] = {
-  4, 8, 8, 8, 8, 8,
-  2, 4,
-  4, 4, 4, 2,
-  4, 4, 4,
-  4, 8, 8, 8, 8,
-  2, 4,
-  4, 4, 4, 4, 4,
+  4, 4, 8, 8, 4, 2,
+  4, 4, 8, 8, 4, 2,
+  4, 4, 8, 8, 2,
+  4, 4, 8, 8, 4, 2,
+  4, 4, 8, 8, 4, 2,
+  4, 4, 8, 8, 2
+};
+
+// 3. Rudolph the Red-Nosed Reindeer (Classic Version)
+const int rudolph_melody[] = {
+  262, 262, 262, 294, 330, 262, 330, 294,
+  262, 262, 262, 294, 330, 262,
+  247, 247, 247, 262, 220,
+  196,
+  
+  262, 262, 262, 294, 330, 262, 330, 294,
+  262, 262, 262, 294, 330, 262,
+  247, 247, 247, 262, 220,
+  196,
+  
+  330, 330, 330, 349, 392,
+  330, 294, 262, 294, 330,
+  262, 220, 196, 220, 247,
+  262,
+  
+  262, 262, 262, 294, 330, 262,
+  294, 294, 294, 330, 294, 262, 220,
+  784, 330, 294, 262, 220,
+  196
+};
+
+const int rudolph_tempo[] = {
+  4, 4, 4, 8, 8, 4, 8, 8,
+  4, 4, 4, 8, 8, 2, 
+  8, 8, 8, 8, 2,
   2,
-  4, 2
-};
-
-const int weWish_size = sizeof(weWish_melody) / sizeof(int);
-
-// ---
-// 3. Santa Claus is Coming to Town (Tempo Adjusted)
-const int santaClaus_melody[] = {
-  NOTE_G4,
-  NOTE_E4, NOTE_F4, NOTE_G4, NOTE_G4, NOTE_G4,
-  NOTE_A4, NOTE_B4, NOTE_C5, NOTE_C5, NOTE_C5,
-  NOTE_E4, NOTE_F4, NOTE_G4, NOTE_G4, NOTE_G4,
-  NOTE_A4, NOTE_G4, NOTE_F4, NOTE_F4,
-  NOTE_E4, NOTE_G4, NOTE_C4, NOTE_E4,
-  NOTE_D4, NOTE_F4, NOTE_B3,
-  NOTE_C4
-};
-
-const int santaClaus_tempo[] = {
-  8,
-  8, 8, 4, 4, 4,
-  8, 8, 4, 4, 4,
-  8, 8, 4, 4, 4,
-  8, 8, 4, 2,
-  4, 4, 4, 4,
-  4, 2, 4,
+  
+  4, 4, 4, 8, 8, 4, 8, 8,
+  4, 4, 4, 8, 8, 2,
+  8, 8, 8, 8, 2,
+  2,
+  
+  4, 4, 4, 8, 8,
+  4, 8, 8, 8, 8,
+  4, 8, 8, 8, 8,
+  2,
+  
+  4, 4, 4, 8, 8, 4,
+  8, 8, 8, 8, 8, 8, 8,
+  4, 8, 8, 4, 2,
   1
 };
 
-const int santaClaus_size = sizeof(santaClaus_melody) / sizeof(int);
+// 4. Let It Snow (Classic version)
+const int letItSnow_melody[] = {
+  523, 587, 659, 698, 784, 880, 784, 698, 659, 587,
+  523, 587, 659, 698, 784, 880, 784, 698, 659, 587,
+  523, 587, 659, 698, 784, 880, 988, 1047,
+  880, 784, 698, 659, 587, 659, 698,
+  659, 587, 523, 494, 523
+};
 
-// ---
-// 4. Silent Night (Tempo Adjusted)
+const int letItSnow_tempo[] = {
+  8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+  8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+  8, 8, 8, 8, 8, 8, 8, 4,
+  8, 8, 8, 8, 8, 8, 4,
+  8, 8, 8, 8, 2
+};
+
+// 5. All I Want for Christmas Is You (Main melody)
+const int allIWant_melody[] = {
+  659, 659, 659, 784, 698, 659, 587,
+  523, 523, 587, 523, 494,
+  440, 440, 494, 440, 392,
+  349, 392, 440, 494, 523, 587, 659,
+  698, 659, 587, 523, 494,
+  523, 587, 659, 698, 784, 880,
+  784, 698, 659, 587, 523
+};
+
+const int allIWant_tempo[] = {
+  8, 8, 4, 8, 8, 8, 8,
+  4, 8, 8, 4, 4,
+  4, 8, 8, 4, 4,
+  8, 8, 8, 8, 8, 8, 8,
+  4, 8, 8, 4, 4,
+  8, 8, 8, 8, 8, 8,
+  4, 8, 8, 4, 2
+};
+
+// 6. Silent Night (Classic version)
 const int silentNight_melody[] = {
-  NOTE_G4, NOTE_A4, NOTE_G4, NOTE_E4,
-  NOTE_G4, NOTE_A4, NOTE_G4, NOTE_E4,
-  NOTE_D5, NOTE_D5, NOTE_B4,
-  NOTE_C5, NOTE_C5, NOTE_G4,
-  NOTE_A4, NOTE_A4, NOTE_C5, NOTE_B4, NOTE_A4,
-  NOTE_G4, NOTE_A4, NOTE_G4, NOTE_E4,
-  NOTE_A4, NOTE_A4, NOTE_C5, NOTE_B4, NOTE_A4,
-  NOTE_G4, NOTE_A4, NOTE_G4, NOTE_E4,
-  NOTE_D5, NOTE_D5, NOTE_F5, NOTE_D5, NOTE_B4,
-  NOTE_C5, NOTE_E5,
-  NOTE_C5, NOTE_G4, NOTE_E4,
-  NOTE_G4, NOTE_F4, NOTE_D4,
-  NOTE_C4, NOTE_C4
+  392, 440, 392, 330,
+  392, 440, 392, 330,
+  587, 587, 494,
+  523, 523, 392,
+  440, 440, 523, 494, 440,
+  392, 440, 392, 330,
+  440, 440, 523, 494, 440,
+  392, 440, 392, 330,
+  587, 587, 698, 587, 494,
+  523, 659,
+  523, 392, 330,
+  392, 349, 294,
+  262
 };
 
 const int silentNight_tempo[] = {
@@ -142,110 +207,22 @@ const int silentNight_tempo[] = {
   2, 2,
   4, 4, 4,
   4, 8, 4,
-  2, 1
-};
-
-const int silentNight_size = sizeof(silentNight_melody) / sizeof(int);
-// ---
-// 5. Rudolph the Red-Nosed Reindeer (Complete melody)
-const int rudolph_melody[] = {
-  NOTE_C4, NOTE_C4, NOTE_C4, NOTE_D4, NOTE_E4, NOTE_C4, NOTE_E4, NOTE_D4,
-  NOTE_C4, NOTE_C4, NOTE_C4, NOTE_D4, NOTE_E4, NOTE_C4,
-  NOTE_B3, NOTE_B3, NOTE_C4, NOTE_B3, NOTE_A3, NOTE_G3,
-  NOTE_C4, NOTE_C4, NOTE_C4, NOTE_D4, NOTE_E4, NOTE_C4, NOTE_E4, NOTE_D4,
-  NOTE_C4, NOTE_C4, NOTE_C4, NOTE_D4, NOTE_E4, NOTE_C4,
-  NOTE_B3, NOTE_B3, NOTE_C4, NOTE_B3, NOTE_A3, NOTE_G3,
-  NOTE_E4, NOTE_E4, NOTE_E4, NOTE_F4, NOTE_G4,
-  NOTE_E4, NOTE_D4, NOTE_C4, NOTE_D4, NOTE_E4,
-  NOTE_C4, NOTE_A3, NOTE_G3, NOTE_A3, NOTE_B3,
-  NOTE_C4
-};
-
-const int rudolph_tempo[] = {
-  4, 4, 4, 8, 8, 4, 8, 8,
-  4, 4, 4, 8, 8, 2,
-  8, 8, 8, 8, 4, 4,
-  4, 4, 4, 8, 8, 4, 8, 8,
-  4, 4, 4, 8, 8, 2,
-  8, 8, 8, 8, 4, 4,
-  4, 4, 4, 8, 8,
-  4, 8, 8, 8, 8,
-  4, 8, 8, 8, 8,
   2
 };
 
-const int rudolph_size = sizeof(rudolph_melody) / sizeof(int);
-
-// ---
-// 6. Let It Snow! Let It Snow! Let It Snow! (Complete melody)
-const int letItSnow_melody[] = {
-  NOTE_C5, NOTE_D5, NOTE_E5, NOTE_F5, NOTE_G5, NOTE_A5, NOTE_G5, NOTE_F5, NOTE_E5, NOTE_D5,
-  NOTE_C5, NOTE_D5, NOTE_E5, NOTE_F5, NOTE_G5, NOTE_A5, NOTE_G5, NOTE_F5, NOTE_E5, NOTE_D5,
-  NOTE_C5, NOTE_D5, NOTE_E5, NOTE_F5, NOTE_G5, NOTE_A5, NOTE_B5, NOTE_C6,
-  NOTE_A5, NOTE_G5, NOTE_F5, NOTE_E5, NOTE_D5, NOTE_E5, NOTE_F5,
-  NOTE_E5, NOTE_D5, NOTE_C5, NOTE_B4, NOTE_C5
+// Array of all songs
+const Song songs[] = {
+  {jingleBells_melody, jingleBells_tempo, sizeof(jingleBells_melody)/sizeof(int), 1000, "Jingle Bells"},
+  {weWish_melody, weWish_tempo, sizeof(weWish_melody)/sizeof(int), 1200, "We Wish You a Merry Christmas"},
+  {rudolph_melody, rudolph_tempo, sizeof(rudolph_melody)/sizeof(int), 1200, "Rudolph the Red-Nosed Reindeer"},
+  {letItSnow_melody, letItSnow_tempo, sizeof(letItSnow_melody)/sizeof(int), 1100, "Let It Snow"},
+  {allIWant_melody, allIWant_tempo, sizeof(allIWant_melody)/sizeof(int), 1000, "All I Want for Christmas Is You"},
+  {silentNight_melody, silentNight_tempo, sizeof(silentNight_melody)/sizeof(int), 1400, "Silent Night"}
 };
 
-const int letItSnow_tempo[] = {
-  8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
-  8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
-  8, 8, 8, 8, 8, 8, 8, 4,
-  8, 8, 8, 8, 8, 8, 4,
-  8, 8, 8, 8, 2
-};
-
-const int letItSnow_size = sizeof(letItSnow_melody) / sizeof(int);
-
-// ---
-// 7. All I Want for Christmas Is You (Main recognizable melody)
-const int allIWant_melody[] = {
-  NOTE_E5, NOTE_E5, NOTE_E5, NOTE_G5, NOTE_F5, NOTE_E5, NOTE_D5,
-  NOTE_C5, NOTE_C5, NOTE_D5, NOTE_C5, NOTE_B4,
-  NOTE_A4, NOTE_A4, NOTE_B4, NOTE_A4, NOTE_G4,
-  NOTE_F4, NOTE_G4, NOTE_A4, NOTE_B4, NOTE_C5, NOTE_D5, NOTE_E5,
-  NOTE_F5, NOTE_E5, NOTE_D5, NOTE_C5, NOTE_B4,
-  NOTE_C5, NOTE_D5, NOTE_E5, NOTE_F5, NOTE_G5, NOTE_A5,
-  NOTE_G5, NOTE_F5, NOTE_E5, NOTE_D5, NOTE_C5
-};
-
-const int allIWant_tempo[] = {
-  8, 8, 4, 8, 8, 8, 8,
-  4, 8, 8, 4, 4,
-  4, 8, 8, 4, 4,
-  8, 8, 8, 8, 8, 8, 8,
-  4, 8, 8, 4, 4,
-  8, 8, 8, 8, 8, 8,
-  4, 8, 8, 4, 2
-};
-
-const int allIWant_size = sizeof(allIWant_melody) / sizeof(int);
-
-// ---
 // Function to get song data
-struct SongData {
-  const int* melody;
-  const int* tempo;
-  int size;
-  int baseTempo;
-};
-
-SongData getSongData(ChristmasSong song) {
-  switch(song) {
-    case JINGLE_BELLS:
-      return {jingleBells_melody, jingleBells_tempo, jingleBells_size, 1000};
-    case WE_WISH:
-      return {weWish_melody, weWish_tempo, weWish_size, 1200};
-    case SANTA_CLAUS:
-      return {santaClaus_melody, santaClaus_tempo, santaClaus_size, 1100};
-    case SILENT_NIGHT:
-      return {silentNight_melody, silentNight_tempo, silentNight_size, 1400};
-    case RUDOLPH:
-      return {rudolph_melody, rudolph_tempo, rudolph_size, 1300};
-    case LET_IT_SNOW:
-      return {letItSnow_melody, letItSnow_tempo, letItSnow_size, 1200};
-    case ALL_I_WANT:
-      return {allIWant_melody, allIWant_tempo, allIWant_size, 1100};
-  }
+inline Song getSongData(ChristmasSong song) {
+  return songs[song];
 }
 
 #endif // CHRISTMAS_SONGS_H

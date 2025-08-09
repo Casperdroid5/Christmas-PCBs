@@ -1,11 +1,12 @@
 #include <Arduino.h>  // Required for PlatformIO
 #include <FastLED.h>
+#include "christmas_songs.h"  // Include our Christmas songs header
 
 // Hardware Configuration - Updated for new PCB
 #define RGB_PIN 3      // Data pin for LED strip (GPIO3)
-#define BUZZER 10      // Buzzer pin (GPIO11)
-#define BUTTON1 4      // Button 1 pin (GPIO4) - change color/pattern
-#define BUTTON2 5      // Button 2 pin (GPIO5) - play song
+#define BUZZER 10      // Buzzer pin (GPIO10)
+#define BUTTON1 4      // Button 1 pin (GPIO4) - change color/pattern ONLY
+#define BUTTON2 5      // Button 2 pin (GPIO5) - play/stop song
 #define BATT_SENSE 3   // Battery voltage sensing pin (GPIO3)
 #define LDR_PIN 6      // Light sensor pin (GPIO6)
 #define NUM_LEDS 8     // Total number of LEDs (based on schematic)
@@ -116,22 +117,6 @@ uint8_t breatheHue = 0;
 uint8_t waveOffset = 0;
 uint8_t waveHue = 0;
 
-// Music Notes (pitches.h equivalent)
-#define NOTE_B3  247
-#define NOTE_C4  262
-#define NOTE_D4  294
-#define NOTE_E4  330
-#define NOTE_F4  349
-#define NOTE_G4  392
-#define NOTE_A4  440
-#define NOTE_B4  494
-#define NOTE_C5  523
-#define NOTE_D5  587
-#define NOTE_E5  659
-#define NOTE_F5  698
-#define NOTE_G5  784
-#define REST     0
-
 // Song State Machine
 enum SongState {
   IDLE,
@@ -140,90 +125,14 @@ enum SongState {
 SongState songState = IDLE;
 
 // Christmas Songs
-enum ChristmasSong {
-  JINGLE_BELLS,
-  WE_WISH,
-  SANTA_CLAUS
-};
 ChristmasSong currentSong = JINGLE_BELLS;
-
-// Jingle Bells melody and tempo
-int jingleBells_melody[] = {
-  NOTE_E5, NOTE_E5, NOTE_E5,
-  NOTE_E5, NOTE_E5, NOTE_E5,
-  NOTE_E5, NOTE_G5, NOTE_C5, NOTE_D5,
-  NOTE_E5,
-  NOTE_F5, NOTE_F5, NOTE_F5, NOTE_F5,
-  NOTE_F5, NOTE_E5, NOTE_E5, NOTE_E5, NOTE_E5,
-  NOTE_E5, NOTE_D5, NOTE_D5, NOTE_E5,
-  NOTE_D5, NOTE_G5
-};
-
-int jingleBells_tempo[] = {
-  8, 8, 4,
-  8, 8, 4,
-  8, 8, 8, 8,
-  2,
-  8, 8, 8, 8,
-  8, 8, 8, 16, 16,
-  8, 8, 8, 8,
-  4, 4
-};
-
-// We Wish You a Merry Christmas melody and tempo
-int weWish_melody[] = {
-  NOTE_B3, 
-  NOTE_F4, NOTE_F4, NOTE_G4, NOTE_F4, NOTE_E4,
-  NOTE_D4, NOTE_D4, NOTE_D4,
-  NOTE_G4, NOTE_G4, NOTE_A4, NOTE_G4, NOTE_F4,
-  NOTE_E4, NOTE_E4, NOTE_E4,
-  NOTE_A4, NOTE_A4, NOTE_B4, NOTE_A4, NOTE_G4,
-  NOTE_F4, NOTE_D4, NOTE_B3, NOTE_B3,
-  NOTE_D4, NOTE_G4, NOTE_E4,
-  NOTE_F4
-};
-
-int weWish_tempo[] = {
-  4,
-  4, 8, 8, 8, 8,
-  4, 4, 4,
-  4, 8, 8, 8, 8,
-  4, 4, 4,
-  4, 8, 8, 8, 8,
-  4, 4, 8, 8,
-  4, 4, 4,
-  2
-};
-
-// Santa Claus is Coming to Town melody and tempo
-int santaClaus_melody[] = {
-  NOTE_G4,
-  NOTE_E4, NOTE_F4, NOTE_G4, NOTE_G4, NOTE_G4,
-  NOTE_A4, NOTE_B4, NOTE_C5, NOTE_C5, NOTE_C5,
-  NOTE_E4, NOTE_F4, NOTE_G4, NOTE_G4, NOTE_G4,
-  NOTE_A4, NOTE_G4, NOTE_F4, NOTE_F4,
-  NOTE_E4, NOTE_G4, NOTE_C4, NOTE_E4,
-  NOTE_D4, NOTE_F4, NOTE_B3,
-  NOTE_C4
-};
-
-int santaClaus_tempo[] = {
-  8,
-  8, 8, 4, 4, 4,
-  8, 8, 4, 4, 4,
-  8, 8, 4, 4, 4,
-  8, 8, 4, 2,
-  4, 4, 4, 4,
-  4, 2, 4,
-  1
-};
+SongData currentSongData;
 
 // Song timing variables
 unsigned long songStepStartTime = 0;
 unsigned long noteEndTime = 0;
 int songStep = 0;
 bool noteCurrentlyPlaying = false;
-int currentSongSize = 0;
 
 // Battery monitoring
 unsigned long lastBatteryCheck = 0;
@@ -253,11 +162,11 @@ void updateDisplay();
 void startSong();
 void stopSong();
 void updateSong();
-void buzz(int targetPin, long frequency, long length);
+void displayChristmasLights();
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Christmas PCB Starting...");
+  Serial.println("🎄 Christmas PCB Starting... 🎄");
   
   // Initialize hardware
   pinMode(BUZZER, OUTPUT);
@@ -277,7 +186,12 @@ void setup() {
   // Initial state
   updateDisplay();
   
-  Serial.println("Christmas PCB Ready!");
+  Serial.println("🎅 Christmas PCB Ready! 🎁");
+  Serial.println("Controls:");
+  Serial.println("  Button 1: Change LED colors/patterns");
+  Serial.println("  Button 2: Play/Stop Christmas songs");
+  Serial.print("Current song queued: ");
+  Serial.println(songNames[currentSong]);
   printPowerStatus();
 }
 
@@ -426,7 +340,7 @@ void checkButtons() {
   }
 
   if ((millis() - lastDebounceTime) > debounceDelay) {
-    // Button 1 - Change mode/color
+    // Button 1 - Change mode/color ONLY (nothing to do with songs)
     if (reading1 != button1State) {
       button1State = reading1;
       if (button1State == LOW) {
@@ -434,7 +348,7 @@ void checkButtons() {
       }
     }
 
-    // Button 2 - Play song
+    // Button 2 - Play/Stop songs
     if (reading2 != button2State) {
       button2State = reading2;
       if (button2State == LOW) {
@@ -448,11 +362,12 @@ void checkButtons() {
 }
 
 void handleButton1Press() {
+  // Button 1 ONLY changes LED patterns/colors - has NOTHING to do with songs
   // Enable LEDs temporarily when button is pressed (even in bright light)
   if (!shouldShowLEDs()) {
     ledsForceEnabled = true;
     forceEnableStartTime = millis();
-    Serial.println("Button pressed - temporarily enabling LEDs");
+    Serial.println("Button 1: Temporarily enabling LEDs");
   }
   
   if (currentMode == STATIC_COLOR) {
@@ -460,10 +375,19 @@ void handleButton1Press() {
     if (currentColorIndex == NUM_COLORS - 1) {
       // After going through all colors, switch to first pattern mode
       currentMode = RAINBOW_MODE;
-      Serial.println("Mode changed to RAINBOW");
+      Serial.println("Button 1: Mode changed to RAINBOW");
     } else {
-      Serial.print("Color changed to index: ");
-      Serial.println(currentColorIndex);
+      Serial.print("Button 1: Color changed to ");
+      switch(currentColorIndex) {
+        case 0: Serial.println("Red"); break;
+        case 1: Serial.println("Green"); break;
+        case 2: Serial.println("Blue"); break;
+        case 3: Serial.println("Purple"); break;
+        case 4: Serial.println("Yellow"); break;
+        case 5: Serial.println("Cyan"); break;
+        case 6: Serial.println("White"); break;
+        case 7: Serial.println("Black"); break;
+      }
     }
   } else {
     // Switch to next pattern mode
@@ -471,38 +395,44 @@ void handleButton1Press() {
     if (currentMode > WAVE_MODE) {
       currentMode = STATIC_COLOR;
       currentColorIndex = 0;
-      Serial.println("Mode reset to STATIC_COLOR");
+      Serial.println("Button 1: Mode reset to STATIC_COLOR (Red)");
     } else {
-      Serial.print("Mode changed to: ");
-      Serial.println((int)currentMode);
+      Serial.print("Button 1: Mode changed to ");
+      switch(currentMode) {
+        case RAINBOW_MODE: Serial.println("RAINBOW"); break;
+        case SNAKE_MODE: Serial.println("SNAKE"); break;
+        case RANDOM_BLINK: Serial.println("RANDOM_BLINK"); break;
+        case CHASE_MODE: Serial.println("CHASE"); break;
+        case BREATHE_MODE: Serial.println("BREATHE"); break;
+        case WAVE_MODE: Serial.println("WAVE"); break;
+        default: break;
+      }
     }
   }
   updateDisplay();
 }
 
 void handleButton2Press() {
-  // Songs always play regardless of light conditions
+  // Button 2 ONLY controls songs
   if (songState == IDLE) {
+    // Start playing current song
+    Serial.print("Button 2: Starting song - ");
+    Serial.println(songNames[currentSong]);
     startSong();
   } else {
+    // Stop current song and cycle to next
+    Serial.print("Button 2: Stopping song - ");
+    Serial.println(songNames[currentSong]);
     stopSong();
-    // Cycle to next song when stopping
+    
+    // Cycle to next song for next time
     currentSong = (ChristmasSong)((int)currentSong + 1);
-    if (currentSong > SANTA_CLAUS) {
+    if (currentSong >= NUM_CHRISTMAS_SONGS) {
       currentSong = JINGLE_BELLS;
     }
     
-    switch (currentSong) {
-      case JINGLE_BELLS:
-        Serial.println("Next song: Jingle Bells");
-        break;
-      case WE_WISH:
-        Serial.println("Next song: We Wish You a Merry Christmas");
-        break;
-      case SANTA_CLAUS:
-        Serial.println("Next song: Santa Claus is Coming to Town");
-        break;
-    }
+    Serial.print("Button 2: Next song queued - ");
+    Serial.println(songNames[currentSong]);
   }
 }
 
@@ -699,33 +629,21 @@ void startSong() {
   noteCurrentlyPlaying = false;
   turnOffAllLEDs();
   
-  // Set current song size based on selected song
-  switch (currentSong) {
-    case JINGLE_BELLS:
-      currentSongSize = sizeof(jingleBells_melody) / sizeof(int);
-      Serial.println("Playing: Jingle Bells");
-      break;
-    case WE_WISH:
-      currentSongSize = sizeof(weWish_melody) / sizeof(int);
-      Serial.println("Playing: We Wish You a Merry Christmas");
-      break;
-    case SANTA_CLAUS:
-      currentSongSize = sizeof(santaClaus_melody) / sizeof(int);
-      Serial.println("Playing: Santa Claus is Coming to Town");
-      break;
-  }
+  // Get current song data
+  currentSongData = getSongData(currentSong);
   
-  // Select color based on current mode
-  if (currentMode != STATIC_COLOR) {
-    currentColorIndex = random8(0, NUM_COLORS - 1); // Avoid black
-  }
+  Serial.print("🎵 Now playing: ");
+  Serial.println(songNames[currentSong]);
+  
+  // Select Christmas color for song
+  currentColorIndex = 0; // Red for Christmas
 }
 
 void stopSong() {
   songState = IDLE;
   noTone(BUZZER);
   updateDisplay();
-  Serial.println("Song stopped");
+  Serial.println("🎵 Song stopped");
 }
 
 void updateSong() {
@@ -743,74 +661,149 @@ void updateSong() {
   
   // Start next note if not currently playing and ready for next note
   if (!noteCurrentlyPlaying && currentTime >= songStepStartTime) {
-    if (songStep < currentSongSize) {
-      int noteDuration = 0;
-      int frequency = 0;
+    if (songStep < currentSongData.size) {
+      int frequency = currentSongData.melody[songStep];
+      int noteDuration = currentSongData.baseTempo / currentSongData.tempo[songStep];
       
-      // Get melody and tempo based on current song
-      switch (currentSong) {
-        case JINGLE_BELLS:
-          frequency = jingleBells_melody[songStep];
-          noteDuration = 1000 / jingleBells_tempo[songStep];
-          break;
-        case WE_WISH:
-          frequency = weWish_melody[songStep];
-          noteDuration = 1000 / weWish_tempo[songStep];
-          break;
-        case SANTA_CLAUS:
-          frequency = santaClaus_melody[songStep];
-          noteDuration = 900 / santaClaus_tempo[songStep];
-          break;
-      }
-      
-      // Play the note
+      // Play the note (using Arduino's built-in tone function for compatibility)
       if (frequency > 0) {
-        buzz(BUZZER, frequency, noteDuration);
+        tone(BUZZER, frequency, noteDuration * 0.9); // Play for 90% of duration
       }
       
       noteEndTime = currentTime + (noteDuration * 1.30); // Note duration + 30% pause
       noteCurrentlyPlaying = true;
       
-      // Progressive LED lighting
-      float progress = (float)songStep / currentSongSize;
-      int ledsToLight = (int)(progress * NUM_LEDS);
-      if (ledsToLight > NUM_LEDS) ledsToLight = NUM_LEDS;
-      
-      // Light up LEDs progressively with Christmas colors
-      for (int i = 0; i < ledsToLight; i++) {
-        if (i % 2 == 0) {
-          leds[i] = CRGB::Red;    // Red
-        } else {
-          leds[i] = CRGB::Green;  // Green
-        }
-      }
+      // Update Christmas light display during song
+      displayChristmasLights();
       
     } else {
-      // Song complete
-      fill_solid(leds, NUM_LEDS, CRGB::Red);
-      delay(500);
-      fill_solid(leds, NUM_LEDS, CRGB::Green);
-      delay(500);
-      fill_solid(leds, NUM_LEDS, CRGB::Red);
-      delay(500);
+      // Song complete - Christmas finale!
+      Serial.println("🎄 Song finished! 🎁");
+      
+      // Flash Christmas colors
+      for (int flash = 0; flash < 3; flash++) {
+        fill_solid(leds, NUM_LEDS, CRGB::Red);
+        FastLED.show();
+        delay(200);
+        fill_solid(leds, NUM_LEDS, CRGB::Green);
+        FastLED.show();
+        delay(200);
+      }
+      fill_solid(leds, NUM_LEDS, CRGB::Gold);
+      FastLED.show();
+      delay(300);
       
       songState = IDLE;
       updateDisplay();
-      Serial.println("Christmas song finished!");
+      
+      // Auto-advance to next song for next play
+      currentSong = (ChristmasSong)((int)currentSong + 1);
+      if (currentSong >= NUM_CHRISTMAS_SONGS) {
+        currentSong = JINGLE_BELLS;
+      }
+      Serial.print("Next song queued: ");
+      Serial.println(songNames[currentSong]);
     }
   }
 }
 
-void buzz(int targetPin, long frequency, long length) {
-  if (frequency == 0) return; // Rest note
+void displayChristmasLights() {
+  // Progressive LED lighting with festive patterns
+  float progress = (float)songStep / currentSongData.size;
+  int ledsToLight = (int)(progress * NUM_LEDS);
+  if (ledsToLight > NUM_LEDS) ledsToLight = NUM_LEDS;
   
-  long delayValue = 1000000 / frequency / 2; // calculate the delay value between transitions
-  long numCycles = frequency * length / 1000; // calculate the number of cycles for proper timing
+  // Different Christmas lighting patterns for different songs
+  switch (currentSong) {
+    case JINGLE_BELLS:
+      // Classic alternating red and green
+      for (int i = 0; i < ledsToLight; i++) {
+        leds[i] = (i % 2 == 0) ? CRGB::Red : CRGB::Green;
+      }
+      break;
+      
+    case SILENT_NIGHT:
+      // Peaceful white and soft blue
+      for (int i = 0; i < ledsToLight; i++) {
+        leds[i] = (i % 2 == 0) ? CRGB::White : CRGB::Blue;
+      }
+      break;
+      
+    case DECK_THE_HALLS:
+      // Festive gold and red
+      for (int i = 0; i < ledsToLight; i++) {
+        leds[i] = (i % 2 == 0) ? CRGB::Gold : CRGB::Red;
+      }
+      break;
+      
+    case O_COME_ALL_YE_FAITHFUL:
+      // Royal purple and gold
+      for (int i = 0; i < ledsToLight; i++) {
+        leds[i] = (i % 2 == 0) ? CRGB::Purple : CRGB::Gold;
+      }
+      break;
+      
+    case THE_FIRST_NOEL:
+      // Bright white and silver (blue)
+      for (int i = 0; i < ledsToLight; i++) {
+        leds[i] = (i % 2 == 0) ? CRGB::White : CRGB::Blue;
+      }
+      break;
+      
+    case JOY_TO_THE_WORLD:
+      // Joyful yellow and red
+      for (int i = 0; i < ledsToLight; i++) {
+        leds[i] = (i % 2 == 0) ? CRGB::Yellow : CRGB::Red;
+      }
+      break;
+      
+    case HARK_THE_HERALD:
+      // Bright white and gold (heavenly)
+      for (int i = 0; i < ledsToLight; i++) {
+        leds[i] = (i % 2 == 0) ? CRGB::White : CRGB::Gold;
+      }
+      break;
+      
+    case ANGELS_WE_HAVE_HEARD:
+      // Angelic white and blue
+      for (int i = 0; i < ledsToLight; i++) {
+        leds[i] = (i % 2 == 0) ? CRGB::White : CRGB::Blue;
+      }
+      break;
+      
+    case GOOD_KING_WENCESLAS:
+      // Royal purple and gold
+      for (int i = 0; i < ledsToLight; i++) {
+        leds[i] = (i % 2 == 0) ? CRGB::Purple : CRGB::Gold;
+      }
+      break;
+      
+    case O_HOLY_NIGHT:
+      // Holy blue and white
+      for (int i = 0; i < ledsToLight; i++) {
+        leds[i] = (i % 2 == 0) ? CRGB::Blue : CRGB::White;
+      }
+      break;
+      
+    case WE_WISH:
+    case SANTA_CLAUS:
+    default:
+      // Traditional Christmas colors with sparkle
+      for (int i = 0; i < ledsToLight; i++) {
+        if (i % 3 == 0) {
+          leds[i] = CRGB::Red;
+        } else if (i % 3 == 1) {
+          leds[i] = CRGB::Green;
+        } else {
+          leds[i] = CRGB::Gold;
+        }
+      }
+      break;
+  }
   
-  for (long i = 0; i < numCycles; i++) {
-    digitalWrite(targetPin, HIGH); // write the buzzer pin high to push out the diaphragm
-    delayMicroseconds(delayValue); // wait for the calculated delay value
-    digitalWrite(targetPin, LOW); // write the buzzer pin low to pull back the diaphragm
-    delayMicroseconds(delayValue); // wait again for the calculated delay value
+  // Add a sparkle effect every few beats
+  if (songStep % 8 == 0 && ledsToLight > 0) {
+    int sparklePos = random(0, ledsToLight);
+    leds[sparklePos] = CRGB::White;
   }
 }

@@ -729,66 +729,19 @@ void displayChristmasLights() {
       }
       break;
       
-    case DECK_THE_HALLS:
-      // Festive gold and red
+    case RUDOLPH:
+      // A special pattern for Rudolph
       for (int i = 0; i < ledsToLight; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Gold : CRGB::Red;
+        if (i == 0) { // The first LED is Rudolph's nose
+          leds[i] = CRGB::Red;
+        } else {
+          leds[i] = CRGB::White;
+        }
       }
       break;
       
-    case O_COME_ALL_YE_FAITHFUL:
-      // Royal purple and gold
-      for (int i = 0; i < ledsToLight; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Purple : CRGB::Gold;
-      }
-      break;
-      
-    case THE_FIRST_NOEL:
-      // Bright white and silver (blue)
-      for (int i = 0; i < ledsToLight; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::White : CRGB::Blue;
-      }
-      break;
-      
-    case JOY_TO_THE_WORLD:
-      // Joyful yellow and red
-      for (int i = 0; i < ledsToLight; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Yellow : CRGB::Red;
-      }
-      break;
-      
-    case HARK_THE_HERALD:
-      // Bright white and gold (heavenly)
-      for (int i = 0; i < ledsToLight; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::White : CRGB::Gold;
-      }
-      break;
-      
-    case ANGELS_WE_HAVE_HEARD:
-      // Angelic white and blue
-      for (int i = 0; i < ledsToLight; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::White : CRGB::Blue;
-      }
-      break;
-      
-    case GOOD_KING_WENCESLAS:
-      // Royal purple and gold
-      for (int i = 0; i < ledsToLight; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Purple : CRGB::Gold;
-      }
-      break;
-      
-    case O_HOLY_NIGHT:
-      // Holy blue and white
-      for (int i = 0; i < ledsToLight; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Blue : CRGB::White;
-      }
-      break;
-      
-    case WE_WISH:
-    case SANTA_CLAUS:
     default:
-      // Traditional Christmas colors with sparkle
+      // Traditional Christmas colors with sparkle for all other songs
       for (int i = 0; i < ledsToLight; i++) {
         if (i % 3 == 0) {
           leds[i] = CRGB::Red;

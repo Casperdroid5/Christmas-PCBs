@@ -18,8 +18,8 @@
 #define BATT_NO_DETECT 0.5      // Below this = no battery detected
 
 // Brightness levels based on power source - Updated to max 60%
-#define BRIGHTNESS_USB 153      // 60% brightness for USB power (153/255 = 60%)
-#define BRIGHTNESS_BATTERY 89   // 35% brightness for battery power
+#define BRIGHTNESS_USB 128      // 50% brightness for USB power (128/255 = 50%)
+#define BRIGHTNESS_BATTERY 60   // 25% brightness for battery power (60/255 = 25%)
 
 // LDR Configuration
 #define LDR_THRESHOLD 2000      // Light threshold (0-4095) - adjust based on testing
@@ -207,11 +207,25 @@ void displayChristmasLights();
 void playMusic(const int16_t melody[], uint16_t numNotes, uint16_t songTempo);
 
 void setup() {
+  // Initialize serial with more aggressive output
   Serial.begin(115200);
-  delay(100);  // Short delay to ensure serial is ready
-  Serial.println("\n\n=== Christmas PCB Starting ===");
-  Serial.println("Firmware Version: 1.0");
+  delay(1000);  // Give serial more time to initialize
+  
+  // Send multiple newlines to help serial monitor sync
+  for(int i = 0; i < 10; i++) {
+    Serial.write('\n');
+    delay(10);
+  }
+  
+  Serial.println("=====================================");
+  Serial.println("=== Christmas PCB Starting... ======");
+  Serial.println("=== Firmware Version: 1.0 ==========");
+  Serial.println("=====================================");
+  Serial.flush();  // Make sure all serial data is sent
+  delay(100);
+  
   Serial.println("Initializing hardware...");
+  Serial.flush();
   
   // Initialize hardware
   pinMode(BUZZER, OUTPUT);
@@ -252,6 +266,31 @@ void setup() {
 }
 
 void loop() {
+  static unsigned long lastHeartbeat = 0;
+  static unsigned long uptime = 0;
+  static bool lastSerialState = false;
+  bool currentSerialState = Serial;
+  
+  // Heartbeat message every second
+  if (millis() - lastHeartbeat >= 1000) {
+    uptime++;
+    lastHeartbeat = millis();
+    Serial.print("Heartbeat - Uptime: ");
+    Serial.print(uptime);
+    Serial.println("s");
+    Serial.flush();  // Force send the data
+  }
+  
+  // Check if serial state changed
+  if (currentSerialState != lastSerialState) {
+    if (currentSerialState) {
+      Serial.println("\n=== Serial Connection Restored ===");
+      printPowerStatus();  // Print current status when connection is restored
+      Serial.flush();
+    }
+    lastSerialState = currentSerialState;
+  }
+  
   checkButtons();
   updateSong();
   
@@ -278,8 +317,8 @@ void loop() {
     lastLDRCheck = millis();
   }
   
-  // Output sensor data every 1 second
-  if (millis() - lastSensorOutput > sensorOutputInterval) {
+  // Output sensor data every 2 seconds
+  if (millis() - lastSensorOutput > 2000) {
     outputSensorData();
     lastSensorOutput = millis();
   }
@@ -440,7 +479,7 @@ void handleButton1Press() {
   } else {
     // Switch to next pattern mode
     currentMode = (DisplayMode)((int)currentMode + 1);
-    if (currentMode >= OFF_MODE) {
+    if (currentMode > OFF_MODE) {  // Changed from >= to > since we want to include OFF_MODE
       currentMode = STATIC_COLOR;
       currentColorIndex = 0;
       Serial.println("Button 1: Mode reset to STATIC_COLOR (Red)");
@@ -1078,6 +1117,9 @@ void outputSensorData() {
       Serial.println(")");
       break;
     }
+    case OFF_MODE:
+      Serial.println("LEDs OFF");
+      break;
     default: Serial.println("Unknown"); break;
   }
   
@@ -1089,4 +1131,5 @@ void outputSensorData() {
     Serial.println(songNames[currentSong]);
   }
   Serial.println("==================\n");
+  Serial.flush();
 }

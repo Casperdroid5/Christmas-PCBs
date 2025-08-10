@@ -1,6 +1,10 @@
 #include <Arduino.h>  // Required for PlatformIO
 #include <FastLED.h>
+#include <Preferences.h>
 #include "christmas_songs.h"  // Include our Christmas songs header
+
+// Preferences object for storing settings
+Preferences preferences;
 
 // Hardware Configuration - Updated for new PCB
 #define RGB_PIN 3      // Data pin for LED strip (GPIO3)
@@ -206,6 +210,41 @@ void updateSong();
 void displayChristmasLights();
 void playMusic(const int16_t melody[], uint16_t numNotes, uint16_t songTempo);
 
+// Function to save current settings to non-volatile memory
+void saveSettings() {
+  preferences.begin("xmas-pcb", false);  // Open preferences in RW mode
+  preferences.putUChar("displayMode", (uint8_t)currentMode);
+  preferences.putUChar("colorIndex", currentColorIndex);
+  preferences.putUChar("songIndex", (uint8_t)currentSong);
+  preferences.end();
+  
+  Serial.println("Settings saved to memory");
+}
+
+// Function to load settings from non-volatile memory
+void loadSettings() {
+  preferences.begin("xmas-pcb", true);  // Open preferences in read-only mode
+  
+  // Load display mode with STATIC_COLOR as default
+  currentMode = (DisplayMode)preferences.getUChar("displayMode", STATIC_COLOR);
+  
+  // Load color index with 0 (Red) as default
+  currentColorIndex = preferences.getUChar("colorIndex", 0);
+  
+  // Load song index with SANTA_CLAUS_IS_COMIN as default
+  currentSong = (ChristmasSong)preferences.getUChar("songIndex", SANTA_CLAUS_IS_COMIN);
+  
+  preferences.end();
+  
+  Serial.println("Settings loaded from memory:");
+  Serial.print("Display Mode: ");
+  Serial.println((int)currentMode);
+  Serial.print("Color Index: ");
+  Serial.println(currentColorIndex);
+  Serial.print("Song: ");
+  Serial.println(songNames[currentSong]);
+}
+
 void setup() {
   // Initialize serial with more aggressive output
   Serial.begin(115200);
@@ -250,11 +289,12 @@ void setup() {
   FastLED.addLeds<WS2812B, RGB_PIN, GRB>(leds, NUM_LEDS);
   FastLED.setBrightness(currentBrightness);
   
-  // Initial state: random red and green LEDs
-  for(int i = 0; i < NUM_LEDS; i++) {
-    leds[i] = random(2) == 0 ? CRGB::Red : CRGB::Green;  // Using random() instead of random8()
-  }
-  FastLED.show();  // Show the random pattern without calling updateDisplay()
+  // Load saved settings from memory
+  loadSettings();
+  
+  // Update display with loaded settings
+  updateDisplay();
+  FastLED.show();
   
   Serial.println("Christmas PCB Ready!");
   Serial.println("Controls:");
@@ -502,6 +542,8 @@ void handleButton1Press() {
     }
   }
   updateDisplay();
+  // Save settings when display mode or color changes
+  saveSettings();
 }
 
 void handleButton2Press() {
@@ -520,6 +562,8 @@ void handleButton2Press() {
     
     Serial.print("Button 2: Next song queued - ");
     Serial.println(songNames[currentSong]);
+    // Save settings when song changes
+    saveSettings();
   } else {
     // Start playing current song
     Serial.print("Button 2: Starting song - ");

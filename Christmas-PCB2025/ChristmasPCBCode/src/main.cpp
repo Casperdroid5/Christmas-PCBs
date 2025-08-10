@@ -84,17 +84,17 @@ CRGB colorOptions[] = {
 unsigned long lastPatternUpdate = 0;
 unsigned long patternUpdateInterval = 50;
 
-// Pattern-specific speed controls (all slowed down)
-const unsigned long RAINBOW_SPEED = 600;    // Slower rainbow transitions
-const unsigned long SNAKE_SPEED = 800;      // Slower snake movement
-const unsigned long CHASE_SPEED = 720;      // Slower chase pattern
-const unsigned long WAVE_SPEED = 480;       // Slower wave movement
-const unsigned long FADE_SPEED = 200;       // Slower fade transitions
-const unsigned long SCATTER_SPEED = 1000;   // Slower scatter updates
-const unsigned long SPARKLE_SPEED = 100;    // Slow enough for smooth sparkles
-const unsigned long FIREWORK_SPEED = 200;   // Slower firework effect
-const unsigned long METEOR_SPEED = 140;     // Slower meteor movement
-const unsigned long CANDY_SPEED = 300;      // Slower candy cane rotation
+// Pattern-specific speed controls, higher value results in slower animation speed
+const unsigned long RAINBOW_SPEED = 600;    
+const unsigned long SNAKE_SPEED = 800;       
+const unsigned long CHASE_SPEED = 720;      
+const unsigned long WAVE_SPEED = 480;       
+const unsigned long FADE_SPEED = 200;       
+const unsigned long SCATTER_SPEED = 1000;   
+const unsigned long SPARKLE_SPEED = 200;    
+const unsigned long FIREWORK_SPEED = 400;   
+const unsigned long METEOR_SPEED = 200;     
+const unsigned long CANDY_SPEED = 600;      
 
 // Fade pattern variables
 uint8_t fadeProgress = 0;
@@ -176,7 +176,7 @@ bool noteCurrentlyPlaying = false;
 unsigned long lastBatteryCheck = 0;
 unsigned long lastSensorOutput = 0;
 const unsigned long batteryCheckInterval = 10000; // Check every 10 seconds
-const unsigned long sensorOutputInterval = 1000;  // Output sensor data every 1 second
+const unsigned long sensorOutputInterval = 500;   // Output sensor data every 0.5 seconds
 
 // Force enable timer (for button interactions in bright light)
 unsigned long forceEnableStartTime = 0;
@@ -208,7 +208,10 @@ void playMusic(const int16_t melody[], uint16_t numNotes, uint16_t songTempo);
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Christmas PCB Starting...");
+  delay(100);  // Short delay to ensure serial is ready
+  Serial.println("\n\n=== Christmas PCB Starting ===");
+  Serial.println("Firmware Version: 1.0");
+  Serial.println("Initializing hardware...");
   
   // Initialize hardware
   pinMode(BUZZER, OUTPUT);
@@ -685,16 +688,16 @@ void updatePatterns() {
             patternUpdateInterval = SCATTER_SPEED;
             break;
         case SPARKLE_MODE:
-            patternUpdateInterval = 50;  // Fast updates for smooth sparkle
+            patternUpdateInterval = SPARKLE_SPEED;
             break;
         case FIREWORK_MODE:
-            patternUpdateInterval = 100;  // Medium speed for firework
+            patternUpdateInterval = FIREWORK_SPEED;
             break;
         case METEOR_MODE:
-            patternUpdateInterval = 70;   // Fast for smooth meteor movement
+            patternUpdateInterval = METEOR_SPEED;
             break;
         case CANDY_CANE_MODE:
-            patternUpdateInterval = 150;  // Medium speed for rotation
+            patternUpdateInterval = CANDY_SPEED;
             break;
         case RAINBOW_MODE:
             patternUpdateInterval = RAINBOW_SPEED;
@@ -1026,20 +1029,55 @@ void outputSensorData() {
   Serial.print(battVoltage * 2, 2);  // Display actual voltage (after voltage divider)
   Serial.println("V");
   
-  Serial.print("Current Mode: ");
+  Serial.print("Animation: ");
+  // Declare variables outside switch
+  int activeSparkles = 0;
+  
   switch(currentMode) {
-    case STATIC_COLOR: Serial.println("Static Color"); break;
+    case STATIC_COLOR: 
+      Serial.print("Static Color (");
+      Serial.print(currentColorIndex == 0 ? "Red" : "Green");
+      Serial.println(")");
+      break;
     case RANDOM_SCATTER: Serial.println("Random Scatter"); break;
     case RAINBOW_MODE: Serial.println("Rainbow"); break;
     case SNAKE_MODE: Serial.println("Snake"); break;
     case RANDOM_BLINK: Serial.println("Random Blink"); break;
     case CHASE_MODE: Serial.println("Chase"); break;
     case WAVE_MODE: Serial.println("Wave"); break;
-    case FADE_RANDOM: Serial.println("Fade Random"); break;
-    case SPARKLE_MODE: Serial.println("Sparkle"); break;
-    case FIREWORK_MODE: Serial.println("Firework"); break;
-    case METEOR_MODE: Serial.println("Meteor"); break;
-    case CANDY_CANE_MODE: Serial.println("Candy Cane"); break;
+    case FADE_RANDOM: 
+      Serial.print("Fade Random (Progress: ");
+      Serial.print(fadeProgress * 100 / 255);
+      Serial.println("%)");
+      break;
+    case SPARKLE_MODE: 
+      Serial.print("Sparkle (Active: ");
+      // Count active sparkles
+      activeSparkles = 0;  // Reset counter
+      for(int i = 0; i < NUM_LEDS; i++) {
+        if(sparkleBrightness[i] > 0) activeSparkles++;
+      }
+      Serial.print(activeSparkles);
+      Serial.println(")");
+      break;
+    case FIREWORK_MODE: {
+      Serial.print("Firework (Phase: ");
+      Serial.print(currentFirework.phase);
+      Serial.println(")");
+      break;
+    }
+    case METEOR_MODE: {
+      Serial.print("Meteor (Position: ");
+      Serial.print(meteorPos);
+      Serial.println(")");
+      break;
+    }
+    case CANDY_CANE_MODE: {
+      Serial.print("Candy Cane (Offset: ");
+      Serial.print(candyOffset);
+      Serial.println(")");
+      break;
+    }
     default: Serial.println("Unknown"); break;
   }
   

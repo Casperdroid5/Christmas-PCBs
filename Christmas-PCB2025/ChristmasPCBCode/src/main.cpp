@@ -60,13 +60,12 @@ enum DisplayMode {
   SNAKE_MODE,
   RANDOM_BLINK,
   CHASE_MODE,
-  BREATHE_MODE,
   WAVE_MODE,
   FADE_RANDOM,       // Fading patterns
-  SPARKLE_MODE,      // New: Twinkling effect
-  FIREWORK_MODE,     // New: Exploding pattern
-  METEOR_MODE,       // New: Shooting star effect
-  CANDY_CANE_MODE,   // New: Rotating stripes
+  SPARKLE_MODE,      // Twinkling effect
+  FIREWORK_MODE,     // Exploding pattern
+  METEOR_MODE,       // Shooting star effect
+  CANDY_CANE_MODE,   // Rotating stripes
   OFF_MODE
 };
 
@@ -85,14 +84,17 @@ CRGB colorOptions[] = {
 unsigned long lastPatternUpdate = 0;
 unsigned long patternUpdateInterval = 50;
 
-// Pattern-specific speed controls (adjusted for battery life)
-const unsigned long RAINBOW_SPEED = 300;    // Twice as slow
-const unsigned long SNAKE_SPEED = 400;      // Twice as slow
-const unsigned long CHASE_SPEED = 360;      // Twice as slow
-const unsigned long WAVE_SPEED = 240;       // Twice as slow
-const unsigned long BREATHE_SPEED = 80;     // Twice as slow
-const unsigned long FADE_SPEED = 100;       // Speed for fade transitions
-const unsigned long SCATTER_SPEED = 500;    // Speed for random scatter updates
+// Pattern-specific speed controls (all slowed down)
+const unsigned long RAINBOW_SPEED = 600;    // Slower rainbow transitions
+const unsigned long SNAKE_SPEED = 800;      // Slower snake movement
+const unsigned long CHASE_SPEED = 720;      // Slower chase pattern
+const unsigned long WAVE_SPEED = 480;       // Slower wave movement
+const unsigned long FADE_SPEED = 200;       // Slower fade transitions
+const unsigned long SCATTER_SPEED = 1000;   // Slower scatter updates
+const unsigned long SPARKLE_SPEED = 100;    // Slow enough for smooth sparkles
+const unsigned long FIREWORK_SPEED = 200;   // Slower firework effect
+const unsigned long METEOR_SPEED = 140;     // Slower meteor movement
+const unsigned long CANDY_SPEED = 300;      // Slower candy cane rotation
 
 // Fade pattern variables
 uint8_t fadeProgress = 0;
@@ -419,14 +421,6 @@ void handleButton1Press() {
     Serial.println("Button 1: Temporarily enabling LEDs");
   }
   
-  // Get new random seed from LDR when changing patterns
-  uint32_t seed = 0;
-  for(int i = 0; i < 8; i++) {
-    seed = (seed << 2) | (analogRead(LDR_PIN) & 0x03);
-    delay(1);
-  }
-  randomSeed(seed);
-  
   if (currentMode == STATIC_COLOR) {
     currentColorIndex = (currentColorIndex + 1) % NUM_COLORS;
     if (currentColorIndex == NUM_COLORS - 1) {
@@ -443,7 +437,7 @@ void handleButton1Press() {
   } else {
     // Switch to next pattern mode
     currentMode = (DisplayMode)((int)currentMode + 1);
-    if (currentMode > CANDY_CANE_MODE) {
+    if (currentMode >= OFF_MODE) {
       currentMode = STATIC_COLOR;
       currentColorIndex = 0;
       Serial.println("Button 1: Mode reset to STATIC_COLOR (Red)");
@@ -455,7 +449,6 @@ void handleButton1Press() {
         case SNAKE_MODE: Serial.println("SNAKE"); break;
         case RANDOM_BLINK: Serial.println("RANDOM BLINK"); break;
         case CHASE_MODE: Serial.println("CHASE"); break;
-        case BREATHE_MODE: Serial.println("BREATHE"); break;
         case WAVE_MODE: Serial.println("WAVE"); break;
         case FADE_RANDOM: Serial.println("FADE RANDOM"); break;
         case SPARKLE_MODE: Serial.println("SPARKLE"); break;
@@ -686,8 +679,6 @@ void updateTreePattern() {
 void updatePatterns() {
     unsigned long currentTime = millis();
     
-    if (songState != IDLE) return; // Don't update patterns while playing song
-    
     // Set update interval based on current mode
     switch (currentMode) {
         case RANDOM_SCATTER:
@@ -717,9 +708,7 @@ void updatePatterns() {
         case WAVE_MODE:
             patternUpdateInterval = WAVE_SPEED;
             break;
-        case BREATHE_MODE:
-            patternUpdateInterval = BREATHE_SPEED;
-            break;
+
         case FADE_RANDOM:
             patternUpdateInterval = FADE_SPEED;
             break;
@@ -753,9 +742,7 @@ void updatePatterns() {
             case CHASE_MODE:
                 updateChasePattern();
                 break;
-            case BREATHE_MODE:
-                updateBreathePattern();
-                break;
+
             case WAVE_MODE:
                 updateWavePattern();
                 break;
@@ -774,6 +761,7 @@ void updatePatterns() {
             case CANDY_CANE_MODE:
                 updateCandyCanePattern();
                 break;
+
             case OFF_MODE:
                 turnOffAllLEDs();
                 break;
@@ -875,9 +863,6 @@ void turnOffAllLEDs() {
 }
 
 void updateDisplay() {
-  if (songState != IDLE) return; // Don't change display while playing song
-  
-  // Only update display if LEDs should be shown
   if (!shouldShowLEDs()) {
     turnOffAllLEDs();
     return;
@@ -885,9 +870,18 @@ void updateDisplay() {
   
   turnOffAllLEDs();
   
+  // Get new random seed from LDR for pattern initialization
+  uint32_t seed = analogRead(LDR_PIN);
+  randomSeed(seed);
+  
   switch (currentMode) {
     case STATIC_COLOR:
       fill_solid(leds, NUM_LEDS, colorOptions[currentColorIndex]);
+      break;
+    case RANDOM_SCATTER:
+      for(int i = 0; i < NUM_LEDS; i++) {
+        leds[i] = random(2) == 0 ? CRGB::Red : CRGB::Green;
+      }
       break;
     case SNAKE_MODE:
       snakeHeadPos = 0;
@@ -903,14 +897,29 @@ void updateDisplay() {
       chasePos = 0;
       chaseHue = random8(0, 255);
       break;
-    case BREATHE_MODE:
-      breatheBrightness = 0;
-      breatheIncreasing = true;
-      breatheHue = random8(0, 1); // Only red or green
-      break;
     case WAVE_MODE:
       waveOffset = 0;
       waveHue = random8(0, 1); // Only red or green
+      break;
+    case SPARKLE_MODE:
+      memset(sparkleBrightness, 0, sizeof(sparkleBrightness));
+      break;
+    case FIREWORK_MODE:
+      currentFirework.position = -1;
+      currentFirework.phase = 0;
+      currentFirework.brightness = 255;
+      currentFirework.isRed = random8(2) == 0;
+      break;
+    case METEOR_MODE:
+      meteorPos = -1;
+      meteorIsRed = true;
+      break;
+    case CANDY_CANE_MODE:
+      candyOffset = 0;
+      break;
+    case FADE_RANDOM:
+      needNewFadeTarget = true;
+      fadeProgress = 0;
       break;
     default:
       break;
@@ -920,7 +929,6 @@ void updateDisplay() {
 void startSong() {
   songState = PLAYING_SONG;
   songStartTime = millis();
-  turnOffAllLEDs();
   
   // Get current song data using our new system
   currentSongData = getSongData(currentSong);
@@ -940,104 +948,107 @@ void stopSong() {
 }
 
 void updateSong() {
+  static unsigned long lastNoteTime = 0;
+  static uint16_t currentNote = 0;
+  static uint16_t currentNoteDuration = 0;
+  
   if (songState == PLAYING_SONG) {
-    // Use the existing playMusic function but make it non-blocking
-    // For now, let's use a simplified approach
-    playMusic(currentSongData.melody, currentSongData.size, currentSongData.baseTempo);
+    unsigned long currentTime = millis();
     
-    // Update Christmas lights during song
-    displayChristmasLights();
-    
-    // Song finished - stop and advance
-    songState = IDLE;
-  Serial.println("Song finished!");
-    updateDisplay();
-    // Auto-advance to next song for next play
-    currentSong = (ChristmasSong)((int)currentSong + 1);
-    if (currentSong >= NUM_CHRISTMAS_SONGS) {
-      currentSong = SANTA_CLAUS_IS_COMIN;
+    // Start new note or finish song
+    if (currentTime - lastNoteTime >= currentNoteDuration) {
+      if (currentNote >= currentSongData.size * 2) {
+        // Song finished
+        songState = IDLE;
+        noTone(BUZZER);
+        currentNote = 0;
+        Serial.println("Song finished!");
+        
+        // Auto-advance to next song
+        currentSong = (ChristmasSong)((int)currentSong + 1);
+        if (currentSong >= NUM_CHRISTMAS_SONGS) {
+          currentSong = SANTA_CLAUS_IS_COMIN;
+        }
+        Serial.print("Next song queued: ");
+        Serial.println(songNames[currentSong]);
+        return;
+      }
+      
+      // Calculate duration for new note
+      uint16_t wholeNote = (60000 * 4) / currentSongData.baseTempo;
+      int8_t noteType = pgm_read_word(&currentSongData.melody[currentNote + 1]);
+      if (noteType > 0) {
+        currentNoteDuration = wholeNote / noteType;
+      } else {
+        currentNoteDuration = wholeNote / abs(noteType) * 1.5;
+      }
+      
+      // Play the new note
+      tone(BUZZER, pgm_read_word(&currentSongData.melody[currentNote]), currentNoteDuration * 0.9);
+      lastNoteTime = currentTime;
+      currentNote += 2;
+      
+      // Debug output for note changes
+      Serial.print("Playing note ");
+      Serial.print(currentNote/2);
+      Serial.print(" of ");
+      Serial.println(currentSongData.size);
     }
-    Serial.print("Next song queued: ");
-    Serial.println(songNames[currentSong]);
   }
 }
-
-void displayChristmasLights() {
-  // All songs now use only red and green
-  for (int i = 0; i < NUM_LEDS; i++) {
-    leds[i] = (i % 2 == 0) ? CRGB::Red : CRGB::Green;
-  }
-}
-
-// New function to output sensor data every second
+// Function to output sensor data every second
 void outputSensorData() {
   // Read current sensor values
   int ldrReading = analogRead(LDR_PIN);
   int battReading = analogRead(BATT_SENSE);
-  float voltage = (battReading / 4095.0) * 3.3;
+  float battVoltage = (battReading / 4095.0) * 3.3;
   
-  Serial.print("Sensors - LDR: ");
+  Serial.println("\n=== Status Update ===");
+  Serial.print("Light Sensor: ");
   Serial.print(ldrReading);
-  Serial.print(", Battery Voltage: ");
-  Serial.print(voltage, 2);
-  Serial.print("V (Raw: ");
-  Serial.print(battReading);
-  Serial.print("), Power: ");
-  switch (currentPowerSource) {
-    case POWER_USB: Serial.print("USB"); break;
-    case POWER_AAA: Serial.print("AAA"); break;
-  }
-  Serial.print(", LEDs: ");
-  Serial.println(shouldShowLEDs() ? "ON" : "OFF");
-}
-
-// Updated playMusic function to work with our new song system
-void playMusic(const int16_t melody[], uint16_t numNotes, uint16_t songTempo) {
-  uint16_t wholeNote = (60000 * 4) / songTempo;
-  uint16_t noteDuration;
-  int8_t noteType;
+  Serial.print(" (LEDs ");
+  Serial.print(shouldShowLEDs() ? "ON" : "OFF");
+  Serial.println(")");
   
-  for (uint16_t i = 0; i < numNotes * 2; i += 2) {
-    // Check if song was stopped during playback
-    if (songState != PLAYING_SONG) {
-      return;
-    }
-    noteType = pgm_read_word(&melody[i + 1]);
-    if (noteType > 0) {
-      noteDuration = wholeNote / noteType;
-    }
-    else {
-      noteDuration = wholeNote / abs(noteType) * 1.5;
-    }
-    // Play the note
-    tone(BUZZER, pgm_read_word(&melody[i]), noteDuration * 0.9);
-    // Update Christmas lights during each note
-    displayChristmasLights();
-    FastLED.show();
-    // Wait for note duration, but check for interrupt
-    unsigned long start = millis();
-    while (millis() - start < noteDuration) {
-      checkButtons();
-      if (songState != PLAYING_SONG) {
-        noTone(BUZZER);
-        return;
-      }
-      delay(5);
-    }
-    noTone(BUZZER);
-    // Check buttons during song playback
-    checkButtons();
-    if (songState != PLAYING_SONG) {
-      return;
-    }
-    // Brief pause between notes, also interruptible
-    start = millis();
-    while (millis() - start < noteDuration * 0.1) {
-      checkButtons();
-      if (songState != PLAYING_SONG) {
-        return;
-      }
-      delay(5);
-    }
+  Serial.print("Power Source: ");
+  switch (currentPowerSource) {
+    case POWER_USB: 
+      Serial.print("USB (Brightness: ");
+      break;
+    case POWER_AAA: 
+      Serial.print("AAA Batteries (Brightness: ");
+      break;
   }
+  Serial.print(currentBrightness * 100 / 255);
+  Serial.println("%)");
+  
+  Serial.print("Battery Voltage: ");
+  Serial.print(battVoltage * 2, 2);  // Display actual voltage (after voltage divider)
+  Serial.println("V");
+  
+  Serial.print("Current Mode: ");
+  switch(currentMode) {
+    case STATIC_COLOR: Serial.println("Static Color"); break;
+    case RANDOM_SCATTER: Serial.println("Random Scatter"); break;
+    case RAINBOW_MODE: Serial.println("Rainbow"); break;
+    case SNAKE_MODE: Serial.println("Snake"); break;
+    case RANDOM_BLINK: Serial.println("Random Blink"); break;
+    case CHASE_MODE: Serial.println("Chase"); break;
+    case WAVE_MODE: Serial.println("Wave"); break;
+    case FADE_RANDOM: Serial.println("Fade Random"); break;
+    case SPARKLE_MODE: Serial.println("Sparkle"); break;
+    case FIREWORK_MODE: Serial.println("Firework"); break;
+    case METEOR_MODE: Serial.println("Meteor"); break;
+    case CANDY_CANE_MODE: Serial.println("Candy Cane"); break;
+    default: Serial.println("Unknown"); break;
+  }
+  
+  if (songState == PLAYING_SONG) {
+    Serial.print("Playing Song: ");
+    Serial.println(songNames[currentSong]);
+  } else {
+    Serial.print("Next Song: ");
+    Serial.println(songNames[currentSong]);
+  }
+  Serial.println("==================\n");
 }

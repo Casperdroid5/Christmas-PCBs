@@ -50,6 +50,16 @@ PowerSource currentPowerSource = POWER_USB;
 int currentBrightness = BRIGHTNESS_USB;
 bool wifiEnabled = true;
 
+// Settings and Uptime Management
+bool settingsChanged = false;
+unsigned long lastSaveTime = 0;
+const unsigned long saveInterval = 30000; // Save every 30 seconds if needed
+
+// Uptime tracking (64-bit for extended duration)
+uint32_t totalUptimeLow = 0;   // Lower 32 bits of uptime in seconds
+uint32_t totalUptimeHigh = 0;  // Upper 32 bits of uptime in seconds
+unsigned long lastMillisCheck = 0; // For millis() overflow detection
+
 // Light Sensor Management
 bool ledsEnabledByLight = true;  // LEDs enabled by light sensor
 bool ledsForceEnabled = false;   // Override for button presses/songs
@@ -209,16 +219,42 @@ void stopSong();
 void updateSong();
 void displayChristmasLights();
 void playMusic(const int16_t melody[], uint16_t numNotes, uint16_t songTempo);
+void saveUptime();
 
-// Function to save current settings to non-volatile memory
-void saveSettings() {
-  preferences.begin("xmas-pcb", false);  // Open preferences in RW mode
-  preferences.putUChar("displayMode", (uint8_t)currentMode);
-  preferences.putUChar("colorIndex", currentColorIndex);
-  preferences.putUChar("songIndex", (uint8_t)currentSong);
-  preferences.end();
-  
-  Serial.println("Settings saved to memory");
+// Function to mark settings as changed
+void markSettingsChanged() {
+    settingsChanged = true;
+}
+
+// Combined function to save settings and uptime if needed
+void saveToMemory() {
+    unsigned long currentMillis = millis();
+    
+    // Check for millis() overflow
+    if (currentMillis < lastSaveTime) {
+        // millis() has overflowed, force a save
+        lastSaveTime = currentMillis;
+    }
+    
+    // Only save if enough time has passed since last save and changes exist
+    if (currentMillis - lastSaveTime >= saveInterval && settingsChanged) {
+        preferences.begin("xmas-pcb", false);  // Open preferences in RW mode
+        
+        // Save settings
+        preferences.putUChar("displayMode", (uint8_t)currentMode);
+        preferences.putUChar("colorIndex", currentColorIndex);
+        preferences.putUChar("songIndex", (uint8_t)currentSong);
+        
+        // Save 64-bit uptime as two 32-bit values
+        preferences.putULong("uptimeLow", totalUptimeLow);
+        preferences.putULong("uptimeHigh", totalUptimeHigh);
+        
+        preferences.end();
+        
+        lastSaveTime = currentMillis;
+        settingsChanged = false;
+        Serial.println("Settings and uptime saved to memory");
+    }
 }
 
 // Function to load settings from non-volatile memory
@@ -234,7 +270,14 @@ void loadSettings() {
   // Load song index with SANTA_CLAUS_IS_COMIN as default
   currentSong = (ChristmasSong)preferences.getUChar("songIndex", SANTA_CLAUS_IS_COMIN);
   
+  // Load 64-bit uptime from two 32-bit values
+  totalUptimeLow = preferences.getULong("uptimeLow", 0);
+  totalUptimeHigh = preferences.getULong("uptimeHigh", 0);
+  
   preferences.end();
+  
+  // Initialize millis() overflow detection
+  lastMillisCheck = millis();
   
   Serial.println("Settings loaded from memory:");
   Serial.print("Display Mode: ");
@@ -243,6 +286,18 @@ void loadSettings() {
   Serial.println(currentColorIndex);
   Serial.print("Song: ");
   Serial.println(songNames[currentSong]);
+  
+  // Calculate total seconds for display
+  uint64_t totalSeconds = ((uint64_t)totalUptimeHigh << 32) | totalUptimeLow;
+  Serial.print("Total Device Uptime: ");
+  Serial.print(totalSeconds / 86400); // Days
+  Serial.print(" days, ");
+  Serial.print((totalSeconds % 86400) / 3600); // Hours
+  Serial.print(" hours, ");
+  Serial.print((totalSeconds % 3600) / 60); // Minutes
+  Serial.print(" minutes, ");
+  Serial.print(totalSeconds % 60); // Seconds
+  Serial.println(" seconds");
 }
 
 void setup() {
@@ -307,18 +362,46 @@ void setup() {
 
 void loop() {
   static unsigned long lastHeartbeat = 0;
-  static unsigned long uptime = 0;
+  static unsigned long sessionUptime = 0;
   static bool lastSerialState = false;
   bool currentSerialState = Serial;
   
-  // Heartbeat message every second
-  if (millis() - lastHeartbeat >= 1000) {
-    uptime++;
-    lastHeartbeat = millis();
-    Serial.print("Heartbeat - Uptime: ");
-    Serial.print(uptime);
+  // Heartbeat message and uptime tracking every second
+  unsigned long currentMillis = millis();
+  if (currentMillis - lastHeartbeat >= 1000) {
+    sessionUptime++;
+    
+    // Update 64-bit uptime counter with overflow handling
+    totalUptimeLow++;
+    if (totalUptimeLow == 0) {  // Counter wrapped around
+        totalUptimeHigh++;  // Increment high word
+    }
+    
+    // Check for millis() overflow
+    if (currentMillis < lastMillisCheck) {
+        // millis() has overflowed, force a save to preserve uptime
+        markSettingsChanged();
+    }
+    lastMillisCheck = currentMillis;
+    
+    lastHeartbeat = currentMillis;
+    uint64_t totalSeconds = ((uint64_t)totalUptimeHigh << 32) | totalUptimeLow;
+    
+    Serial.print("Heartbeat - Session Uptime: ");
+    Serial.print(sessionUptime);
+    Serial.print("s, Total Uptime: ");
+    Serial.print(totalSeconds / 86400); // Days
+    Serial.print("d ");
+    Serial.print((totalSeconds % 86400) / 3600); // Hours
+    Serial.print("h ");
+    Serial.print((totalSeconds % 3600) / 60); // Minutes
+    Serial.print("m ");
+    Serial.print(totalSeconds % 60); // Seconds
     Serial.println("s");
     Serial.flush();  // Force send the data
+    
+    // Mark settings as changed every second to ensure uptime is saved periodically
+    markSettingsChanged();
   }
   
   // Check if serial state changed
@@ -368,6 +451,9 @@ void loop() {
     ledsForceEnabled = false;
     Serial.println("Force enable timeout - returning to automatic light control");
   }
+  
+  // Check if we need to save settings and uptime
+  saveToMemory();
   
   FastLED.show();
 }
@@ -542,8 +628,8 @@ void handleButton1Press() {
     }
   }
   updateDisplay();
-  // Save settings when display mode or color changes
-  saveSettings();
+  // Mark settings as changed when display mode or color changes
+  markSettingsChanged();
 }
 
 void handleButton2Press() {
@@ -562,8 +648,8 @@ void handleButton2Press() {
     
     Serial.print("Button 2: Next song queued - ");
     Serial.println(songNames[currentSong]);
-    // Save settings when song changes
-    saveSettings();
+    // Mark settings as changed when song changes
+    markSettingsChanged();
   } else {
     // Start playing current song
     Serial.print("Button 2: Starting song - ");
@@ -1091,11 +1177,8 @@ void outputSensorData() {
   
   Serial.println("\n=== Status Update ===");
   Serial.print("Light Sensor: ");
-  Serial.print(ldrReading);
-  Serial.print(" (LEDs ");
-  Serial.print(shouldShowLEDs() ? "ON" : "OFF");
-  Serial.println(")");
-  
+  Serial.println(ldrReading);
+
   Serial.print("Power Source: ");
   switch (currentPowerSource) {
     case POWER_USB: 
@@ -1176,4 +1259,16 @@ void outputSensorData() {
   }
   Serial.println("==================\n");
   Serial.flush();
+}
+
+// Helper function to format uptime as string
+String getUptimeString() {
+    uint64_t totalSeconds = ((uint64_t)totalUptimeHigh << 32) | totalUptimeLow;
+    char buffer[50];
+    snprintf(buffer, sizeof(buffer), "%llu days %02llu:%02llu:%02llu",
+        totalSeconds / 86400,
+        (totalSeconds % 86400) / 3600,
+        (totalSeconds % 3600) / 60,
+        totalSeconds % 60);
+    return String(buffer);
 }

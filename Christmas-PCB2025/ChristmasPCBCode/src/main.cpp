@@ -7,19 +7,18 @@
 #define BUZZER 10      // Buzzer pin (GPIO10)
 #define BUTTON1 4      // Button 1 pin (GPIO4) - change color/pattern ONLY
 #define BUTTON2 5      // Button 2 pin (GPIO5) - play/stop song
-#define BATT_SENSE 0   // Battery voltage sensing pin (GPIO3)
-#define LDR_PIN 2      // Light sensor pin (GPIO6)
-#define NUM_LEDS 8     // Total number of LEDs (based on schematic)
+#define BATT_SENSE 0   // Battery voltage sensing pin (GPIO0)
+#define LDR_PIN 2      // Light sensor pin (GPIO2)
+#define NUM_LEDS 8     // Total number of LEDs 
 
 // Battery voltage thresholds (after voltage divider: actual voltage = reading * 2)
-#define BATT_CR2032_MIN 2.75    // 5.5V / 2 = 2.75V (CR2032 batteries)
-#define BATT_CR2032_MAX 3.5     // 7V / 2 = 3.5V (CR2032 batteries)
+// CR2032 battery not used in this design
 #define BATT_AAA_MIN 1.8        // 3.6V / 2 = 1.8V (AAA batteries)
 #define BATT_AAA_MAX 2.75       // 5.5V / 2 = 2.75V (AAA batteries)
 #define BATT_NO_DETECT 0.5      // Below this = no battery detected
 
-// Brightness levels based on power source
-#define BRIGHTNESS_USB 230      // 90% brightness for USB power
+// Brightness levels based on power source - Updated to max 60%
+#define BRIGHTNESS_USB 153      // 60% brightness for USB power (153/255 = 60%)
 #define BRIGHTNESS_BATTERY 89   // 35% brightness for battery power
 
 // LDR Configuration
@@ -41,7 +40,6 @@ unsigned long debounceDelay = 50;
 // Power Management
 enum PowerSource {
   POWER_USB,
-  POWER_CR2032,
   POWER_AAA
 };
 PowerSource currentPowerSource = POWER_USB;
@@ -57,28 +55,29 @@ int lastLDRReading = 0;
 // Display Mode Enum
 enum DisplayMode {
   STATIC_COLOR,
+  RANDOM_SCATTER,     // Random red/green pattern
   RAINBOW_MODE,
   SNAKE_MODE,
   RANDOM_BLINK,
   CHASE_MODE,
   BREATHE_MODE,
   WAVE_MODE,
+  FADE_RANDOM,       // Fading patterns
+  SPARKLE_MODE,      // New: Twinkling effect
+  FIREWORK_MODE,     // New: Exploding pattern
+  METEOR_MODE,       // New: Shooting star effect
+  CANDY_CANE_MODE,   // New: Rotating stripes
   OFF_MODE
 };
 
 DisplayMode currentMode = STATIC_COLOR;
 
-// Color Options (Used for STATIC_COLOR mode)
+// Color Options (Limited to Christmas colors: Red, Green, White)
 int currentColorIndex = 0;
 CRGB colorOptions[] = {
   CRGB::Red,
   CRGB::Green,
-  CRGB::Blue,
-  CRGB::Purple,
-  CRGB::Yellow,
-  CRGB::Cyan,
-  CRGB::White,
-  CRGB::Black
+  CRGB::Green // Solid green mode
 };
 #define NUM_COLORS (sizeof(colorOptions) / sizeof(colorOptions[0]))
 
@@ -87,11 +86,19 @@ unsigned long lastPatternUpdate = 0;
 unsigned long patternUpdateInterval = 50;
 
 // Pattern-specific speed controls (adjusted for battery life)
-const unsigned long RAINBOW_SPEED = 150;   // Slower to save power
-const unsigned long SNAKE_SPEED = 200;     // Slower snake movement
-const unsigned long CHASE_SPEED = 180;     // Slower chase pattern
-const unsigned long WAVE_SPEED = 120;      // Slower wave
-const unsigned long BREATHE_SPEED = 40;    // Slower breathe
+const unsigned long RAINBOW_SPEED = 300;    // Twice as slow
+const unsigned long SNAKE_SPEED = 400;      // Twice as slow
+const unsigned long CHASE_SPEED = 360;      // Twice as slow
+const unsigned long WAVE_SPEED = 240;       // Twice as slow
+const unsigned long BREATHE_SPEED = 80;     // Twice as slow
+const unsigned long FADE_SPEED = 100;       // Speed for fade transitions
+const unsigned long SCATTER_SPEED = 500;    // Speed for random scatter updates
+
+// Fade pattern variables
+uint8_t fadeProgress = 0;
+CRGB currentFadeColors[NUM_LEDS];
+CRGB targetFadeColors[NUM_LEDS];
+bool needNewFadeTarget = true;
 
 // Snake Pattern Variables
 uint8_t snakeHeadPos = 0;
@@ -117,6 +124,34 @@ uint8_t breatheHue = 0;
 uint8_t waveOffset = 0;
 uint8_t waveHue = 0;
 
+// Sparkle Pattern Variables
+uint8_t sparklePositions[NUM_LEDS];
+uint8_t sparkleBrightness[NUM_LEDS];
+uint8_t sparkleColors[NUM_LEDS];
+
+// Firework Pattern Variables
+struct Firework {
+    int8_t position;
+    uint8_t phase;  // 0=launch, 1=explode, 2=fade
+    uint8_t brightness;
+    bool isRed;
+};
+Firework currentFirework = {-1, 0, 0, true};
+
+// Meteor Pattern Variables
+int8_t meteorPos = -1;
+uint8_t meteorTail[3];
+bool meteorIsRed = true;
+
+// Candy Cane Pattern Variables
+uint8_t candyOffset = 0;
+uint8_t stripeWidth = 2;
+
+// Tree Pattern Variables
+uint8_t treePhase = 0;
+uint8_t treeStarBrightness = 0;
+bool treeStarIncreasing = true;
+
 // Song State Machine
 enum SongState {
   IDLE,
@@ -135,19 +170,22 @@ unsigned long noteEndTime = 0;
 int songStep = 0;
 bool noteCurrentlyPlaying = false;
 
-// Battery monitoring
+// Sensor monitoring - Updated for 1 second intervals
 unsigned long lastBatteryCheck = 0;
+unsigned long lastSensorOutput = 0;
 const unsigned long batteryCheckInterval = 10000; // Check every 10 seconds
+const unsigned long sensorOutputInterval = 1000;  // Output sensor data every 1 second
 
 // Force enable timer (for button interactions in bright light)
 unsigned long forceEnableStartTime = 0;
 const unsigned long forceEnableTimeout = 30000; // 30 seconds
 
-// Function prototypes
+// Function prototypes - Updated
 void checkPowerSource();
 void checkLightSensor();
 bool shouldShowLEDs();
 void printPowerStatus();
+void outputSensorData();  // New function prototype
 void checkButtons();
 void handleButton1Press();
 void handleButton2Press();
@@ -168,7 +206,7 @@ void playMusic(const int16_t melody[], uint16_t numNotes, uint16_t songTempo);
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("🎄 Christmas PCB Starting... 🎄");
+  Serial.println("Christmas PCB Starting...");
   
   // Initialize hardware
   pinMode(BUZZER, OUTPUT);
@@ -176,6 +214,14 @@ void setup() {
   pinMode(BUTTON2, INPUT_PULLUP);
   pinMode(BATT_SENSE, INPUT);
   pinMode(LDR_PIN, INPUT);
+  
+  // Get random seed from LDR readings
+  uint32_t seed = 0;
+  for(int i = 0; i < 16; i++) {  // More readings since we're only using LDR
+    seed = (seed << 2) | (analogRead(LDR_PIN) & 0x03);  // Use lower 2 bits (most random)
+    delay(1);  // Small delay between readings
+  }
+  randomSeed(seed);  // Seed the random number generator
   
   // Check initial power source and light conditions
   checkPowerSource();
@@ -185,10 +231,13 @@ void setup() {
   FastLED.addLeds<WS2812B, RGB_PIN, GRB>(leds, NUM_LEDS);
   FastLED.setBrightness(currentBrightness);
   
-  // Initial state
-  updateDisplay();
+  // Initial state: random red and green LEDs
+  for(int i = 0; i < NUM_LEDS; i++) {
+    leds[i] = random(2) == 0 ? CRGB::Red : CRGB::Green;  // Using random() instead of random8()
+  }
+  FastLED.show();  // Show the random pattern without calling updateDisplay()
   
-  Serial.println("🎅 Christmas PCB Ready! 🎁");
+  Serial.println("Christmas PCB Ready!");
   Serial.println("Controls:");
   Serial.println("  Button 1: Change LED colors/patterns");
   Serial.println("  Button 2: Play/Stop Christmas songs");
@@ -224,6 +273,12 @@ void loop() {
     lastLDRCheck = millis();
   }
   
+  // Output sensor data every 1 second
+  if (millis() - lastSensorOutput > sensorOutputInterval) {
+    outputSensorData();
+    lastSensorOutput = millis();
+  }
+  
   // Check force enable timeout
   if (ledsForceEnabled && (millis() - forceEnableStartTime > forceEnableTimeout)) {
     ledsForceEnabled = false;
@@ -245,11 +300,6 @@ void checkPowerSource() {
     currentPowerSource = POWER_USB;
     currentBrightness = BRIGHTNESS_USB;
     wifiEnabled = true;
-  } else if (voltage >= BATT_CR2032_MIN && voltage <= BATT_CR2032_MAX) {
-    // CR2032 batteries detected
-    currentPowerSource = POWER_CR2032;
-    currentBrightness = BRIGHTNESS_BATTERY;
-    wifiEnabled = false;
   } else if (voltage >= BATT_AAA_MIN && voltage <= BATT_AAA_MAX) {
     // AAA batteries detected
     currentPowerSource = POWER_AAA;
@@ -317,9 +367,6 @@ void printPowerStatus() {
     case POWER_USB:
       Serial.print("USB");
       break;
-    case POWER_CR2032:
-      Serial.print("CR2032");
-      break;
     case POWER_AAA:
       Serial.print("AAA");
       break;
@@ -372,41 +419,49 @@ void handleButton1Press() {
     Serial.println("Button 1: Temporarily enabling LEDs");
   }
   
+  // Get new random seed from LDR when changing patterns
+  uint32_t seed = 0;
+  for(int i = 0; i < 8; i++) {
+    seed = (seed << 2) | (analogRead(LDR_PIN) & 0x03);
+    delay(1);
+  }
+  randomSeed(seed);
+  
   if (currentMode == STATIC_COLOR) {
     currentColorIndex = (currentColorIndex + 1) % NUM_COLORS;
     if (currentColorIndex == NUM_COLORS - 1) {
       // After going through all colors, switch to first pattern mode
-      currentMode = RAINBOW_MODE;
-      Serial.println("Button 1: Mode changed to RAINBOW");
+      currentMode = RANDOM_SCATTER;
+      Serial.println("Button 1: Mode changed to RANDOM SCATTER");
     } else {
       Serial.print("Button 1: Color changed to ");
       switch(currentColorIndex) {
         case 0: Serial.println("Red"); break;
         case 1: Serial.println("Green"); break;
-        case 2: Serial.println("Blue"); break;
-        case 3: Serial.println("Purple"); break;
-        case 4: Serial.println("Yellow"); break;
-        case 5: Serial.println("Cyan"); break;
-        case 6: Serial.println("White"); break;
-        case 7: Serial.println("Black"); break;
       }
     }
   } else {
     // Switch to next pattern mode
     currentMode = (DisplayMode)((int)currentMode + 1);
-    if (currentMode > WAVE_MODE) {
+    if (currentMode > CANDY_CANE_MODE) {
       currentMode = STATIC_COLOR;
       currentColorIndex = 0;
       Serial.println("Button 1: Mode reset to STATIC_COLOR (Red)");
     } else {
       Serial.print("Button 1: Mode changed to ");
       switch(currentMode) {
+        case RANDOM_SCATTER: Serial.println("RANDOM SCATTER"); break;
         case RAINBOW_MODE: Serial.println("RAINBOW"); break;
         case SNAKE_MODE: Serial.println("SNAKE"); break;
-        case RANDOM_BLINK: Serial.println("RANDOM_BLINK"); break;
+        case RANDOM_BLINK: Serial.println("RANDOM BLINK"); break;
         case CHASE_MODE: Serial.println("CHASE"); break;
         case BREATHE_MODE: Serial.println("BREATHE"); break;
         case WAVE_MODE: Serial.println("WAVE"); break;
+        case FADE_RANDOM: Serial.println("FADE RANDOM"); break;
+        case SPARKLE_MODE: Serial.println("SPARKLE"); break;
+        case FIREWORK_MODE: Serial.println("FIREWORK"); break;
+        case METEOR_MODE: Serial.println("METEOR"); break;
+        case CANDY_CANE_MODE: Serial.println("CANDY CANE"); break;
         default: break;
       }
     }
@@ -415,14 +470,9 @@ void handleButton1Press() {
 }
 
 void handleButton2Press() {
-  // Button 2 ONLY controls songs
-  if (songState == IDLE) {
-    // Start playing current song
-    Serial.print("Button 2: Starting song - ");
-    Serial.println(songNames[currentSong]);
-    startSong();
-  } else {
-    // Stop current song and cycle to next
+  // Button 2 controls songs - IMMEDIATE stop/start
+  if (songState == PLAYING_SONG) {
+    // IMMEDIATELY stop current song
     Serial.print("Button 2: Stopping song - ");
     Serial.println(songNames[currentSong]);
     stopSong();
@@ -435,75 +485,308 @@ void handleButton2Press() {
     
     Serial.print("Button 2: Next song queued - ");
     Serial.println(songNames[currentSong]);
+  } else {
+    // Start playing current song
+    Serial.print("Button 2: Starting song - ");
+    Serial.println(songNames[currentSong]);
+    startSong();
   }
+}
+
+void updateRandomScatter() {
+    // Use LDR to influence the probability of changes
+    int ldrReading = analogRead(LDR_PIN);
+    uint8_t changeProb = map(ldrReading & 0x0F, 0, 15, 1, 4); // 1/1 to 1/4 chance based on light
+    
+    for(int i = 0; i < NUM_LEDS; i++) {
+        if(random8(changeProb) == 0) { // Random chance to change each LED
+            leds[i] = random8(2) == 0 ? CRGB::Red : CRGB::Green;
+        }
+    }
+}
+
+void updateFadeRandom() {
+    if (needNewFadeTarget) {
+        // Save current colors as start point
+        for(int i = 0; i < NUM_LEDS; i++) {
+            currentFadeColors[i] = leds[i];
+        }
+        
+        // Generate new random target colors using LDR
+        int ldrReading = analogRead(LDR_PIN);
+        uint8_t pattern = ldrReading & 0x03; // Use bottom 2 bits for pattern selection
+        
+        for(int i = 0; i < NUM_LEDS; i++) {
+            switch(pattern) {
+                case 0: // Random red/green
+                    targetFadeColors[i] = random8(2) == 0 ? CRGB::Red : CRGB::Green;
+                    break;
+                case 1: // Alternating
+                    targetFadeColors[i] = ((i + fadeProgress/32) % 2) == 0 ? CRGB::Red : CRGB::Green;
+                    break;
+                case 2: // Groups of 2
+                    targetFadeColors[i] = ((i + fadeProgress/32) % 4) < 2 ? CRGB::Red : CRGB::Green;
+                    break;
+                case 3: // Chase pattern
+                    targetFadeColors[i] = ((i + fadeProgress/32) % NUM_LEDS) < NUM_LEDS/2 ? CRGB::Red : CRGB::Green;
+                    break;
+            }
+        }
+        needNewFadeTarget = false;
+        fadeProgress = 0;
+    }
+    
+    // Update fade progress
+    fadeProgress += 4;
+    
+    // Apply fade between current and target colors
+    for(int i = 0; i < NUM_LEDS; i++) {
+        leds[i] = blend(currentFadeColors[i], targetFadeColors[i], fadeProgress);
+    }
+    
+    // Check if fade is complete
+    if(fadeProgress >= 255) {
+        needNewFadeTarget = true;
+    }
+}
+
+void updateSparklePattern() {
+    // Start new sparkles
+    if(random8(3) == 0) {  // 1/3 chance to start new sparkle
+        uint8_t pos = random8(NUM_LEDS);
+        if(sparkleBrightness[pos] == 0) {
+            sparklePositions[pos] = pos;
+            sparkleBrightness[pos] = 255;
+            sparkleColors[pos] = random8(2);  // 0 = red, 1 = green
+        }
+    }
+    
+    // Update existing sparkles
+    for(int i = 0; i < NUM_LEDS; i++) {
+        if(sparkleBrightness[i] > 0) {
+            leds[i] = sparkleColors[i] == 0 ? CRGB::Red : CRGB::Green;
+            leds[i].nscale8(sparkleBrightness[i]);
+            sparkleBrightness[i] = (sparkleBrightness[i] * 3) >> 2; // Fade out
+        } else {
+            leds[i] = CRGB::Black;
+        }
+    }
+}
+
+void updateFireworkPattern() {
+    // Clear all LEDs first
+    turnOffAllLEDs();
+    
+    // Start new firework if none active
+    if(currentFirework.position == -1) {
+        currentFirework.position = 0;
+        currentFirework.phase = 0;
+        currentFirework.brightness = 255;
+        currentFirework.isRed = random8(2) == 0;
+    }
+    
+    // Update firework
+    switch(currentFirework.phase) {
+        case 0: // Launch
+            leds[currentFirework.position] = currentFirework.isRed ? CRGB::Red : CRGB::Green;
+            leds[currentFirework.position].nscale8(currentFirework.brightness);
+            currentFirework.position++;
+            if(currentFirework.position >= NUM_LEDS/2) {
+                currentFirework.phase = 1;
+            }
+            break;
+            
+        case 1: // Explode
+            for(int i = 0; i < NUM_LEDS; i++) {
+                if(random8(2) == 0) {
+                    leds[i] = currentFirework.isRed ? CRGB::Red : CRGB::Green;
+                    leds[i].nscale8(currentFirework.brightness);
+                }
+            }
+            currentFirework.brightness = (currentFirework.brightness * 7) >> 3;
+            if(currentFirework.brightness < 40) {
+                currentFirework.phase = 2;
+            }
+            break;
+            
+        case 2: // Reset
+            currentFirework.position = -1;
+            break;
+    }
+}
+
+void updateMeteorPattern() {
+    // Fade all LEDs
+    for(int i = 0; i < NUM_LEDS; i++) {
+        leds[i].nscale8(192);
+    }
+    
+    // Start new meteor if needed
+    if(meteorPos == -1) {
+        meteorPos = NUM_LEDS;
+        meteorIsRed = !meteorIsRed;  // Alternate colors
+        for(int i = 0; i < 3; i++) {
+            meteorTail[i] = 255 - (i * 64);  // Decreasing brightness tail
+        }
+    }
+    
+    // Update meteor position
+    meteorPos--;
+    
+    // Draw meteor and tail
+    for(int i = 0; i < 3; i++) {
+        int pos = meteorPos + i;
+        if(pos >= 0 && pos < NUM_LEDS) {
+            leds[pos] = meteorIsRed ? CRGB::Red : CRGB::Green;
+            leds[pos].nscale8(meteorTail[i]);
+        }
+    }
+    
+    // Reset when off screen
+    if(meteorPos < -3) {
+        meteorPos = -1;
+    }
+}
+
+void updateCandyCanePattern() {
+    candyOffset = (candyOffset + 1) % (NUM_LEDS * 2);
+    
+    for(int i = 0; i < NUM_LEDS; i++) {
+        bool isRed = ((i + candyOffset/2) / stripeWidth) % 2 == 0;
+        leds[i] = isRed ? CRGB::Red : CRGB::Green;
+    }
+}
+
+void updateTreePattern() {
+    // Update star brightness
+    if(treeStarIncreasing) {
+        treeStarBrightness = qadd8(treeStarBrightness, 2);
+        if(treeStarBrightness >= 255) treeStarIncreasing = false;
+    } else {
+        treeStarBrightness = qsub8(treeStarBrightness, 2);
+        if(treeStarBrightness <= 100) treeStarIncreasing = true;
+    }
+    
+    // Tree pattern phases
+    treePhase = (treePhase + 1) % 4;
+    
+    for(int i = 0; i < NUM_LEDS; i++) {
+        if(i == NUM_LEDS-1) {
+            // Star on top
+            leds[i] = CRGB::Red;
+            leds[i].nscale8(treeStarBrightness);
+        } else {
+            // Tree branches
+            bool isRed = ((i + treePhase) % 3) == 0;
+            leds[i] = isRed ? CRGB::Red : CRGB::Green;
+        }
+    }
 }
 
 void updatePatterns() {
-  unsigned long currentTime = millis();
-  
-  if (songState != IDLE) return; // Don't update patterns while playing song
-  
-  // Set update interval based on current mode
-  switch (currentMode) {
-    case RAINBOW_MODE:
-      patternUpdateInterval = RAINBOW_SPEED;
-      break;
-    case SNAKE_MODE:
-      patternUpdateInterval = SNAKE_SPEED;
-      break;
-    case CHASE_MODE:
-      patternUpdateInterval = CHASE_SPEED;
-      break;
-    case WAVE_MODE:
-      patternUpdateInterval = WAVE_SPEED;
-      break;
-    case BREATHE_MODE:
-      patternUpdateInterval = BREATHE_SPEED;
-      break;
-    case RANDOM_BLINK:
-      // Uses its own timing
-      break;
-    default:
-      patternUpdateInterval = 50;
-      break;
-  }
-  
-  if (currentTime - lastPatternUpdate >= patternUpdateInterval) {
-    lastPatternUpdate = currentTime;
+    unsigned long currentTime = millis();
     
+    if (songState != IDLE) return; // Don't update patterns while playing song
+    
+    // Set update interval based on current mode
     switch (currentMode) {
-      case STATIC_COLOR:
-        // No animation needed
-        break;
-      case RAINBOW_MODE:
-        updateRainbowPattern();
-        break;
-      case SNAKE_MODE:
-        updateSnakePattern();
-        break;
-      case RANDOM_BLINK:
-        updateRandomBlinkPattern(currentTime);
-        break;
-      case CHASE_MODE:
-        updateChasePattern();
-        break;
-      case BREATHE_MODE:
-        updateBreathePattern();
-        break;
-      case WAVE_MODE:
-        updateWavePattern();
-        break;
-      case OFF_MODE:
-        turnOffAllLEDs();
-        break;
+        case RANDOM_SCATTER:
+            patternUpdateInterval = SCATTER_SPEED;
+            break;
+        case SPARKLE_MODE:
+            patternUpdateInterval = 50;  // Fast updates for smooth sparkle
+            break;
+        case FIREWORK_MODE:
+            patternUpdateInterval = 100;  // Medium speed for firework
+            break;
+        case METEOR_MODE:
+            patternUpdateInterval = 70;   // Fast for smooth meteor movement
+            break;
+        case CANDY_CANE_MODE:
+            patternUpdateInterval = 150;  // Medium speed for rotation
+            break;
+        case RAINBOW_MODE:
+            patternUpdateInterval = RAINBOW_SPEED;
+            break;
+        case SNAKE_MODE:
+            patternUpdateInterval = SNAKE_SPEED;
+            break;
+        case CHASE_MODE:
+            patternUpdateInterval = CHASE_SPEED;
+            break;
+        case WAVE_MODE:
+            patternUpdateInterval = WAVE_SPEED;
+            break;
+        case BREATHE_MODE:
+            patternUpdateInterval = BREATHE_SPEED;
+            break;
+        case FADE_RANDOM:
+            patternUpdateInterval = FADE_SPEED;
+            break;
+        case RANDOM_BLINK:
+            // Uses its own timing
+            break;
+        default:
+            patternUpdateInterval = 50;
+            break;
     }
-  }
+    
+    if (currentTime - lastPatternUpdate >= patternUpdateInterval) {
+        lastPatternUpdate = currentTime;
+        
+        switch (currentMode) {
+            case STATIC_COLOR:
+                // No animation needed
+                break;
+            case RANDOM_SCATTER:
+                updateRandomScatter();
+                break;
+            case RAINBOW_MODE:
+                updateRainbowPattern();
+                break;
+            case SNAKE_MODE:
+                updateSnakePattern();
+                break;
+            case RANDOM_BLINK:
+                updateRandomBlinkPattern(currentTime);
+                break;
+            case CHASE_MODE:
+                updateChasePattern();
+                break;
+            case BREATHE_MODE:
+                updateBreathePattern();
+                break;
+            case WAVE_MODE:
+                updateWavePattern();
+                break;
+            case FADE_RANDOM:
+                updateFadeRandom();
+                break;
+            case SPARKLE_MODE:
+                updateSparklePattern();
+                break;
+            case FIREWORK_MODE:
+                updateFireworkPattern();
+                break;
+            case METEOR_MODE:
+                updateMeteorPattern();
+                break;
+            case CANDY_CANE_MODE:
+                updateCandyCanePattern();
+                break;
+            case OFF_MODE:
+                turnOffAllLEDs();
+                break;
+        }
+    }
 }
 
 void updateRainbowPattern() {
-  breatheHue++;
+  // Christmas rainbow - cycle between red and green only
+  static uint8_t colorStep = 0;
+  colorStep++;
   for (int i = 0; i < NUM_LEDS; i++) {
-    leds[i] = CHSV(breatheHue + (i * 255 / NUM_LEDS), 255, 255);
+    leds[i] = ( ((colorStep + i) % 2) == 0 ) ? CRGB::Red : CRGB::Green;
   }
 }
 
@@ -511,12 +794,17 @@ void updateSnakePattern() {
   turnOffAllLEDs();
   
   snakeHeadPos = (snakeHeadPos + 1) % NUM_LEDS;
-  snakeHue += 2;
+  
+  // Cycle through red and green for snake
+  static uint8_t snakeColorIndex = 0;
+  if (snakeHeadPos == 0) snakeColorIndex = (snakeColorIndex + 1) % 2;
+  CRGB snakeColor = (snakeColorIndex == 0) ? CRGB::Red : CRGB::Green;
   
   for (int i = 0; i < snakeLength; i++) {
     int pos = (snakeHeadPos - i + NUM_LEDS) % NUM_LEDS;
     int brightness = 255 - (i * 255 / snakeLength);
-    leds[pos] = CHSV(snakeHue, 255, brightness);
+    leds[pos] = snakeColor;
+    leds[pos].nscale8(brightness);
   }
 }
 
@@ -531,11 +819,11 @@ void updateRandomBlinkPattern(unsigned long currentTime) {
       }
     }
     
-    // Generate new random LEDs
+    // Generate new random LEDs with only red and green
+    CRGB christmasColors[] = {CRGB::Red, CRGB::Green};
     for (int i = 0; i < 3; i++) {
       randomLEDs[i] = random8(0, NUM_LEDS);
-      randomHues[i] = random8(0, 255);
-      leds[randomLEDs[i]] = CHSV(randomHues[i], 255, 255);
+      leds[randomLEDs[i]] = christmasColors[random8(0, 2)];
     }
   }
 }
@@ -543,10 +831,12 @@ void updateRandomBlinkPattern(unsigned long currentTime) {
 void updateChasePattern() {
   turnOffAllLEDs();
   
-  leds[chasePos] = CHSV(chaseHue, 255, 255);
-  
+  // Cycle through red and green
+  static uint8_t chaseColorIndex = 0;
+  CRGB chaseColor = (chaseColorIndex == 0) ? CRGB::Red : CRGB::Green;
+  leds[chasePos] = chaseColor;
   chasePos = (chasePos + 1) % NUM_LEDS;
-  chaseHue += 10;
+  if (chasePos == 0) chaseColorIndex = (chaseColorIndex + 1) % 2;
 }
 
 void updateBreathePattern() {
@@ -559,11 +849,14 @@ void updateBreathePattern() {
     breatheBrightness -= 3;
     if (breatheBrightness <= 5) {
       breatheIncreasing = true;
-      breatheHue += 10;
+      breatheHue = (breatheHue + 1) % 2; // Cycle through 2 colors
     }
   }
-  
-  fill_solid(leds, NUM_LEDS, CHSV(breatheHue, 255, breatheBrightness));
+  CRGB breatheColor = (breatheHue == 0) ? CRGB::Red : CRGB::Green;
+  fill_solid(leds, NUM_LEDS, breatheColor);
+  for (int i = 0; i < NUM_LEDS; i++) {
+    leds[i].nscale8(breatheBrightness);
+  }
 }
 
 void updateWavePattern() {
@@ -571,10 +864,10 @@ void updateWavePattern() {
   
   for (int i = 0; i < NUM_LEDS; i++) {
     uint8_t sinBrightness = sin8(waveOffset + (i * 255 / NUM_LEDS));
-    leds[i] = CHSV(waveHue, 255, sinBrightness);
+    CRGB waveColor = (i % 2 == 0) ? CRGB::Red : CRGB::Green;
+    leds[i] = waveColor;
+    leds[i].nscale8(sinBrightness);
   }
-  
-  waveHue++;
 }
 
 void turnOffAllLEDs() {
@@ -613,11 +906,11 @@ void updateDisplay() {
     case BREATHE_MODE:
       breatheBrightness = 0;
       breatheIncreasing = true;
-      breatheHue = random8(0, 255);
+      breatheHue = random8(0, 1); // Only red or green
       break;
     case WAVE_MODE:
       waveOffset = 0;
-      waveHue = random8(0, 255);
+      waveHue = random8(0, 1); // Only red or green
       break;
     default:
       break;
@@ -632,7 +925,7 @@ void startSong() {
   // Get current song data using our new system
   currentSongData = getSongData(currentSong);
   
-  Serial.print("🎵 Now playing: ");
+  Serial.print("Now playing: ");
   Serial.println(songNames[currentSong]);
   
   // Play the song using our playMusic function (non-blocking version needed)
@@ -643,7 +936,7 @@ void stopSong() {
   songState = IDLE;
   noTone(BUZZER);
   updateDisplay();
-  Serial.println("🎵 Song stopped");
+  Serial.println("Song stopped");
 }
 
 void updateSong() {
@@ -657,25 +950,8 @@ void updateSong() {
     
     // Song finished - stop and advance
     songState = IDLE;
-    
-    // Christmas finale!
-    Serial.println("🎄 Song finished! 🎁");
-    
-    // Flash Christmas colors
-    for (int flash = 0; flash < 3; flash++) {
-      fill_solid(leds, NUM_LEDS, CRGB::Red);
-      FastLED.show();
-      delay(200);
-      fill_solid(leds, NUM_LEDS, CRGB::Green);
-      FastLED.show();
-      delay(200);
-    }
-    fill_solid(leds, NUM_LEDS, CRGB::Gold);
-    FastLED.show();
-    delay(300);
-    
+  Serial.println("Song finished!");
     updateDisplay();
-    
     // Auto-advance to next song for next play
     currentSong = (ChristmasSong)((int)currentSong + 1);
     if (currentSong >= NUM_CHRISTMAS_SONGS) {
@@ -687,143 +963,32 @@ void updateSong() {
 }
 
 void displayChristmasLights() {
-  // Different Christmas lighting patterns for different songs
-  switch (currentSong) {
-    case JINGLE_BELLS:
-      // Classic alternating red and green
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Red : CRGB::Green;
-      }
-      break;
-      
-    case SILENT_NIGHT:
-      // Peaceful white and soft blue
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::White : CRGB::Blue;
-      }
-      break;
-      
-    case DECK_THE_HALLS:
-      // Festive gold and red
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Gold : CRGB::Red;
-      }
-      break;
-      
-    case O_COME_ALL_YE_FAITHFUL:
-      // Royal purple and gold
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Purple : CRGB::Gold;
-      }
-      break;
-      
-    case THE_FIRST_NOEL:
-      // Bright white and silver (blue)
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::White : CRGB::Blue;
-      }
-      break;
-      
-    case JOY_TO_THE_WORLD:
-      // Joyful yellow and red
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Yellow : CRGB::Red;
-      }
-      break;
-      
-    case HARK_THE_HERALD_ANGELS_SING:
-      // Bright white and gold (heavenly)
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::White : CRGB::Gold;
-      }
-      break;
-      
-    case AWAY_IN_A_MANGER:
-      // Gentle blue and white
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Blue : CRGB::White;
-      }
-      break;
-      
-    case CAROL_OF_THE_BELLS:
-      // Magical purple and silver
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Purple : CRGB::White;
-      }
-      break;
-      
-    case GOD_REST_YE_MERRY_GENTLEMEN:
-      // Traditional red and green
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Red : CRGB::Green;
-      }
-      break;
-      
-    case GO_TELL_IT_ON_THE_MOUNTAIN:
-      // Bright yellow and blue
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Yellow : CRGB::Blue;
-      }
-      break;
-      
-    case WE_THREE_KINGS:
-      // Royal purple and gold
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Purple : CRGB::Gold;
-      }
-      break;
-      
-    case WHITE_CHRISTMAS:
-      // Pure white and silver
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::White : CRGB::Silver;
-      }
-      break;
-      
-    case O_CHRISTMAS_TREE:
-      // Green tree with gold ornaments
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Green : CRGB::Gold;
-      }
-      break;
-      
-    case O_LITTLE_TOWN_OF_BETHLEHEM:
-      // Holy blue and gold
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Blue : CRGB::Gold;
-      }
-      break;
-      
-    case RUDOLPH_THE_RED_NOSED:
-      // Red nose with green
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = (i % 2 == 0) ? CRGB::Red : CRGB::Green;
-      }
-      break;
-      
-    case WE_WISH_YOU_A_MERRY_CHRISTMAS:
-    case SANTA_CLAUS_IS_COMIN:
-    default:
-      // Traditional Christmas colors with sparkle
-      for (int i = 0; i < NUM_LEDS; i++) {
-        if (i % 3 == 0) {
-          leds[i] = CRGB::Red;
-        } else if (i % 3 == 1) {
-          leds[i] = CRGB::Green;
-        } else {
-          leds[i] = CRGB::Gold;
-        }
-      }
-      break;
+  // All songs now use only red and green
+  for (int i = 0; i < NUM_LEDS; i++) {
+    leds[i] = (i % 2 == 0) ? CRGB::Red : CRGB::Green;
   }
+}
+
+// New function to output sensor data every second
+void outputSensorData() {
+  // Read current sensor values
+  int ldrReading = analogRead(LDR_PIN);
+  int battReading = analogRead(BATT_SENSE);
+  float voltage = (battReading / 4095.0) * 3.3;
   
-  // Add a twinkling effect
-  static unsigned long lastTwinkle = 0;
-  if (millis() - lastTwinkle > 500) {
-    int twinklePos = random(0, NUM_LEDS);
-    leds[twinklePos] = CRGB::White;
-    lastTwinkle = millis();
+  Serial.print("Sensors - LDR: ");
+  Serial.print(ldrReading);
+  Serial.print(", Battery Voltage: ");
+  Serial.print(voltage, 2);
+  Serial.print("V (Raw: ");
+  Serial.print(battReading);
+  Serial.print("), Power: ");
+  switch (currentPowerSource) {
+    case POWER_USB: Serial.print("USB"); break;
+    case POWER_AAA: Serial.print("AAA"); break;
   }
+  Serial.print(", LEDs: ");
+  Serial.println(shouldShowLEDs() ? "ON" : "OFF");
 }
 
 // Updated playMusic function to work with our new song system
@@ -835,9 +1000,8 @@ void playMusic(const int16_t melody[], uint16_t numNotes, uint16_t songTempo) {
   for (uint16_t i = 0; i < numNotes * 2; i += 2) {
     // Check if song was stopped during playback
     if (songState != PLAYING_SONG) {
-      break;
+      return;
     }
-    
     noteType = pgm_read_word(&melody[i + 1]);
     if (noteType > 0) {
       noteDuration = wholeNote / noteType;
@@ -845,22 +1009,35 @@ void playMusic(const int16_t melody[], uint16_t numNotes, uint16_t songTempo) {
     else {
       noteDuration = wholeNote / abs(noteType) * 1.5;
     }
-    
     // Play the note
     tone(BUZZER, pgm_read_word(&melody[i]), noteDuration * 0.9);
-    
     // Update Christmas lights during each note
     displayChristmasLights();
     FastLED.show();
-    
-    // Wait for note duration
-    delay(noteDuration);
+    // Wait for note duration, but check for interrupt
+    unsigned long start = millis();
+    while (millis() - start < noteDuration) {
+      checkButtons();
+      if (songState != PLAYING_SONG) {
+        noTone(BUZZER);
+        return;
+      }
+      delay(5);
+    }
     noTone(BUZZER);
-    
     // Check buttons during song playback
     checkButtons();
-    
-    // Brief pause between notes
-    delay(noteDuration * 0.1);
+    if (songState != PLAYING_SONG) {
+      return;
+    }
+    // Brief pause between notes, also interruptible
+    start = millis();
+    while (millis() - start < noteDuration * 0.1) {
+      checkButtons();
+      if (songState != PLAYING_SONG) {
+        return;
+      }
+      delay(5);
+    }
   }
 }

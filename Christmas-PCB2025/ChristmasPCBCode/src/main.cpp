@@ -7,8 +7,8 @@
 #define BUZZER 10      // Buzzer pin (GPIO10)
 #define BUTTON1 4      // Button 1 pin (GPIO4) - change color/pattern ONLY
 #define BUTTON2 5      // Button 2 pin (GPIO5) - play/stop song
-#define BATT_SENSE 3   // Battery voltage sensing pin (GPIO3)
-#define LDR_PIN 6      // Light sensor pin (GPIO6)
+#define BATT_SENSE 0   // Battery voltage sensing pin (GPIO3)
+#define LDR_PIN 2      // Light sensor pin (GPIO6)
 #define NUM_LEDS 8     // Total number of LEDs (based on schematic)
 
 // Battery voltage thresholds (after voltage divider: actual voltage = reading * 2)

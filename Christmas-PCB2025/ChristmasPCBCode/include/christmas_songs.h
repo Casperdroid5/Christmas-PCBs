@@ -26,6 +26,7 @@
 #ifndef CHRISTMAS_SONGS_H
 #define CHRISTMAS_SONGS_H
 
+#include <Arduino.h>
 #include "pitches.h"
 
 #ifndef REST
@@ -300,10 +301,10 @@ const int16_t joyToTheWorld[] PROGMEM {
 // Default tempos for each song
 const int defaultTempos[] = {
   137,  // Santa Claus Is Coming to Town
-  180,  // Jingle Bells (updated from repository)
+  180,  // Jingle Bells
   160,  // We Wish You a Merry Christmas
   130,  // Silent Night
-  150,  // Rudolph the Red-Nosed Reindeer
+  200,  // Rudolph the Red-Nosed Reindeer
   115,  // O Christmas Tree
   140,  // O Come All Ye Faithful
   125,  // O Little Town of Bethlehem

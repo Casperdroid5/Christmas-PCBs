@@ -1,10 +1,44 @@
 #include <Arduino.h>  // Required for PlatformIO
 #include <FastLED.h>
 #include <Preferences.h>
+#include <esp_now.h>
+#include <WiFi.h>
 #include "christmas_songs.h"  // Include our Christmas songs header
 
 // Preferences object for storing settings
 Preferences preferences;
+
+// ESP-NOW related definitions
+#define ESPNOW_CHANNEL 1
+#define ESPNOW_ENCRYPT false  // Set to true and provide key for encryption
+#define MAX_PEERS 4  // Maximum number of synchronized devices
+
+// ESP-NOW message types
+enum MessageType {
+    SYNC_REQUEST = 1,
+    SYNC_PATTERN = 2,
+    SYNC_COLOR = 3,
+    SYNC_ANIMATION = 4
+};
+
+// ESP-NOW message structure
+typedef struct {
+    MessageType type;
+    uint8_t displayMode;
+    uint8_t colorIndex;
+    uint8_t patternStep;
+    uint32_t timestamp;
+} esp_now_message_t;
+
+// ESP-NOW peer management
+esp_now_peer_info_t peers[MAX_PEERS];
+int peerCount = 0;
+
+// Sync mode variables
+bool syncModeActive = false;
+unsigned long buttonHoldStartTime = 0;
+const unsigned long BUTTON_HOLD_TIME = 2000;  // 2 seconds for activation
+bool bothButtonsPressed = false;
 
 // Hardware Configuration - Updated for new PCB
 #define RGB_PIN 3      // Data pin for LED strip (GPIO3)
@@ -191,7 +225,7 @@ void checkPowerSource();
 void checkLightSensor();
 bool shouldShowLEDs();
 void printPowerStatus();
-void outputSensorData();  // New function prototype
+void outputSensorData();
 void checkButtons();
 void handleButton1Press();
 void handleButton2Press();
@@ -209,6 +243,19 @@ void stopSong();
 void updateSong();
 void displayChristmasLights();
 void playMusic(const int16_t melody[], uint16_t numNotes, uint16_t songTempo);
+
+// ESP-NOW function prototypes
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status);
+void OnDataRecv(const uint8_t *mac, const uint8_t *data, int len);
+void initESPNow();
+void startSyncMode();
+void stopSyncMode();
+void broadcastPattern();
+
+// Convert colorIndex to uint8_t to avoid narrowing conversion warnings
+uint8_t getCurrentColorIndex() {
+    return static_cast<uint8_t>(currentColorIndex % 256);
+}
 
 // Function to save current settings to non-volatile memory
 void saveSettings() {
@@ -431,8 +478,8 @@ void checkLightSensor() {
 }
 
 bool shouldShowLEDs() {
-  // Always show LEDs during song playback
-  if (songState == PLAYING_SONG) {
+  // Always show LEDs during song playback or sync mode
+  if (songState == PLAYING_SONG || syncModeActive) {
     return true;
   }
   
@@ -473,19 +520,54 @@ void checkButtons() {
   }
 
   if ((millis() - lastDebounceTime) > debounceDelay) {
-    // Button 1 - Change mode/color ONLY (nothing to do with songs)
-    if (reading1 != button1State) {
-      button1State = reading1;
-      if (button1State == LOW) {
-        handleButton1Press();
+    bool wasPressed = bothButtonsPressed;
+    bothButtonsPressed = (reading1 == LOW && reading2 == LOW);
+    
+    // Check for both buttons pressed
+    if (bothButtonsPressed && !wasPressed) {
+      buttonHoldStartTime = millis();
+    } else if (!bothButtonsPressed && wasPressed) {
+      // Buttons released before hold time
+      if (millis() - buttonHoldStartTime < BUTTON_HOLD_TIME) {
+        buttonHoldStartTime = 0;
       }
     }
+    
+    static bool syncModeTriggered = false;
+    
+    // Check if buttons have been held long enough
+    if (bothButtonsPressed && (millis() - buttonHoldStartTime >= BUTTON_HOLD_TIME) && !syncModeTriggered) {
+      syncModeTriggered = true;
+      if (!syncModeActive) {
+        startSyncMode();
+      } else {
+        stopSyncMode();
+      }
+      buttonHoldStartTime = 0;  // Reset timer
+      return;  // Skip normal button handling
+    } else if (!bothButtonsPressed) {
+      syncModeTriggered = false;  // Reset trigger only when buttons are released
+    }
+    
+    // Normal single button handling
+    if (!bothButtonsPressed) {
+      // Button 1 - Change mode/color ONLY
+      if (reading1 != button1State) {
+        button1State = reading1;
+        if (button1State == LOW) {
+          handleButton1Press();
+          if (syncModeActive) {
+            broadcastPattern();  // Share pattern change with peers
+          }
+        }
+      }
 
-    // Button 2 - Play/Stop songs
-    if (reading2 != button2State) {
-      button2State = reading2;
-      if (button2State == LOW) {
-        handleButton2Press();
+      // Button 2 - Play/Stop songs
+      if (reading2 != button2State) {
+        button2State = reading2;
+        if (button2State == LOW) {
+          handleButton2Press();
+        }
       }
     }
   }
@@ -1083,6 +1165,152 @@ void updateSong() {
   }
 }
 // Function to output sensor data every second
+// ESP-NOW callback when data is sent
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+    if (status != ESP_NOW_SEND_SUCCESS) {
+        Serial.println("Error sending ESP-NOW message");
+    }
+}
+
+// ESP-NOW callback when data is received
+void OnDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
+    if (len == sizeof(esp_now_message_t)) {
+        esp_now_message_t *message = (esp_now_message_t*)data;
+        
+        if (!syncModeActive) return;  // Only process messages if in sync mode
+        
+        switch (message->type) {
+            case SYNC_REQUEST:
+                // New device wants to join sync
+                if (peerCount < MAX_PEERS) {
+                    esp_now_peer_info_t peer;
+                    memcpy(peer.peer_addr, mac, 6);
+                    peer.channel = ESPNOW_CHANNEL;
+                    peer.encrypt = ESPNOW_ENCRYPT;
+                    if (esp_now_add_peer(&peer) == ESP_OK) {
+                        peers[peerCount++] = peer;
+                        // Send current state
+                        esp_now_message_t response = {
+                            .type = SYNC_PATTERN,
+                            .displayMode = (uint8_t)currentMode,
+                            .colorIndex = getCurrentColorIndex(),
+                            .patternStep = 0,
+                            .timestamp = millis()
+                        };
+                        esp_now_send(mac, (uint8_t*)&response, sizeof(response));
+                    }
+                }
+                break;
+                
+            case SYNC_PATTERN:
+                // Update local display to match received pattern
+                currentMode = (DisplayMode)message->displayMode;
+                currentColorIndex = message->colorIndex;
+                updateDisplay();
+                break;
+                
+            case SYNC_ANIMATION:
+                // Sync animation step for coordinated patterns
+                // Implementation depends on specific pattern
+                break;
+        }
+    }
+}
+
+// Initialize ESP-NOW
+void initESPNow() {
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    
+    if (esp_now_init() == ESP_OK) {
+        Serial.println("ESP-NOW initialized successfully");
+        esp_now_register_send_cb(OnDataSent);
+        esp_now_register_recv_cb(OnDataRecv);
+    } else {
+        Serial.println("ESP-NOW initialization failed");
+        return;
+    }
+}
+
+// Start ESP-NOW sync mode
+void startSyncMode() {
+    if (currentPowerSource != POWER_USB) {
+        Serial.println("Sync mode only available on USB power");
+        return;
+    }
+    
+    if (syncModeActive) {
+        Serial.println("Sync mode already active");
+        return;
+    }
+    
+    syncModeActive = true;
+    peerCount = 0;
+    
+    // Initialize ESP-NOW
+    WiFi.disconnect();
+    delay(100);  // Give WiFi time to disconnect
+    initESPNow();
+    
+    // Broadcast sync request
+    uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    esp_now_message_t message = {
+        .type = SYNC_REQUEST,
+        .displayMode = (uint8_t)currentMode,
+        .colorIndex = getCurrentColorIndex(),
+        .patternStep = 0,
+        .timestamp = millis()
+    };
+    
+    esp_now_peer_info_t broadcast;
+    memcpy(broadcast.peer_addr, broadcastAddress, 6);
+    broadcast.channel = ESPNOW_CHANNEL;
+    broadcast.encrypt = ESPNOW_ENCRYPT;
+    
+    if (esp_now_add_peer(&broadcast) == ESP_OK) {
+        esp_now_send(broadcastAddress, (uint8_t*)&message, sizeof(message));
+        Serial.println("Sync mode activated - searching for nearby devices...");
+    }
+}
+
+// Stop ESP-NOW sync mode
+void stopSyncMode() {
+    if (!syncModeActive) return;
+    
+    syncModeActive = false;
+    
+    // Remove all peers first
+    for (int i = 0; i < peerCount; i++) {
+        esp_now_del_peer(peers[i].peer_addr);
+    }
+    peerCount = 0;
+    
+    // Cleanup ESP-NOW
+    esp_now_deinit();
+    WiFi.disconnect(true);  // Disconnect and clear saved settings
+    WiFi.mode(WIFI_OFF);
+    delay(100);  // Give WiFi time to shut down
+    
+    Serial.println("Sync mode deactivated");
+}
+
+// Broadcast current pattern to all peers
+void broadcastPattern() {
+    if (!syncModeActive) return;
+    
+    esp_now_message_t message = {
+        .type = SYNC_PATTERN,
+        .displayMode = (uint8_t)currentMode,
+        .colorIndex = getCurrentColorIndex(),
+        .patternStep = 0,
+        .timestamp = millis()
+    };
+    
+    for (int i = 0; i < peerCount; i++) {
+        esp_now_send(peers[i].peer_addr, (uint8_t*)&message, sizeof(message));
+    }
+}
+
 void outputSensorData() {
   // Read current sensor values
   int ldrReading = analogRead(LDR_PIN);
@@ -1174,6 +1402,13 @@ void outputSensorData() {
     Serial.print("Next Song: ");
     Serial.println(songNames[currentSong]);
   }
+  
+  if (syncModeActive) {
+    Serial.print("Sync Mode: Active with ");
+    Serial.print(peerCount);
+    Serial.println(" connected devices");
+  }
+  
   Serial.println("==================\n");
   Serial.flush();
 }

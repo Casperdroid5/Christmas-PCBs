@@ -41,6 +41,11 @@ bool lastButton2State = HIGH;
 unsigned long lastDebounceTime = 0;
 unsigned long debounceDelay = 50;
 
+// Long press detection for Button 1
+unsigned long button1PressStartTime = 0;
+bool button1LongPressDetected = false;
+const unsigned long longPressTime = 2000; // 2 seconds for long press
+
 // Power Management
 enum PowerSource {
   POWER_USB,
@@ -62,9 +67,14 @@ unsigned long lastMillisCheck = 0; // For millis() overflow detection
 
 // Light Sensor Management
 bool ledsEnabledByLight = true;  // LEDs enabled by light sensor
-bool ledsForceEnabled = false;   // Override for button presses/songs
+bool ledsForceEnabled = false;   // Override for button presses/songs - NOW SAVED TO FLASH
 unsigned long lastLDRCheck = 0;
 int lastLDRReading = 0;
+
+// Auto re-enable in darkness
+unsigned long darknessStartTime = 0;
+bool inDarkness = false;
+const unsigned long darknessReEnableDelay = 5000; // 5 seconds
 
 // Display Mode Enum
 enum DisplayMode {
@@ -192,16 +202,14 @@ unsigned long lastSensorOutput = 0;
 const unsigned long batteryCheckInterval = 10000; // Check every 10 seconds
 const unsigned long sensorOutputInterval = 500;   // Output sensor data every 0.5 seconds
 
-// Force enable timer (for button interactions in bright light)
-unsigned long forceEnableStartTime = 0;
-const unsigned long forceEnableTimeout = 30000; // 30 seconds
-
 // Function prototypes - Updated
 void checkPowerSource();
 void checkLightSensor();
 bool shouldShowLEDs();
 void printPowerStatus();
 void outputSensorData();  // New function prototype
+void handleButton1LongPress();
+void flashLEDsToIndicateMode();
 void checkButtons();
 void handleButton1Press();
 void handleButton2Press();
@@ -244,6 +252,7 @@ void saveToMemory() {
         preferences.putUChar("displayMode", (uint8_t)currentMode);
         preferences.putUChar("colorIndex", currentColorIndex);
         preferences.putUChar("songIndex", (uint8_t)currentSong);
+        preferences.putBool("forceEnabled", ledsForceEnabled);  // Save force enable state
         
         // Save 64-bit uptime as two 32-bit values
         preferences.putULong("uptimeLow", totalUptimeLow);
@@ -270,6 +279,9 @@ void loadSettings() {
   // Load song index with SANTA_CLAUS_IS_COMIN as default
   currentSong = (ChristmasSong)preferences.getUChar("songIndex", SANTA_CLAUS_IS_COMIN);
   
+  // Load force enable state with false as default
+  ledsForceEnabled = preferences.getBool("forceEnabled", false);
+  
   // Load 64-bit uptime from two 32-bit values
   totalUptimeLow = preferences.getULong("uptimeLow", 0);
   totalUptimeHigh = preferences.getULong("uptimeHigh", 0);
@@ -286,6 +298,8 @@ void loadSettings() {
   Serial.println(currentColorIndex);
   Serial.print("Song: ");
   Serial.println(songNames[currentSong]);
+  Serial.print("Force Enabled: ");
+  Serial.println(ledsForceEnabled ? "Yes" : "No");
   
   // Calculate total seconds for display
   uint64_t totalSeconds = ((uint64_t)totalUptimeHigh << 32) | totalUptimeLow;
@@ -313,7 +327,8 @@ void setup() {
   
   Serial.println("=====================================");
   Serial.println("=== Christmas PCB Starting... ======");
-  Serial.println("=== Firmware Version: 1.0 ==========");
+  Serial.println("=== Firmware Version: 1.1 ==========");
+  Serial.println("=== No Force Enable Timeout ========");
   Serial.println("=====================================");
   Serial.flush();  // Make sure all serial data is sent
   delay(100);
@@ -446,11 +461,7 @@ void loop() {
     lastSensorOutput = millis();
   }
   
-  // Check force enable timeout
-  if (ledsForceEnabled && (millis() - forceEnableStartTime > forceEnableTimeout)) {
-    ledsForceEnabled = false;
-    Serial.println("Force enable timeout - returning to automatic light control");
-  }
+  // REMOVED: Force enable timeout check - ledsForceEnabled now persists until manually changed
   
   // Check if we need to save settings and uptime
   saveToMemory();
@@ -498,15 +509,42 @@ void checkPowerSource() {
 void checkLightSensor() {
   int ldrReading = analogRead(LDR_PIN);
   
-  // Apply hysteresis to prevent flickering
+  // Check if we're in darkness (below threshold)
+  bool isDark = ldrReading < (LDR_THRESHOLD - LDR_HYSTERESIS);
+  
+  // Track darkness duration for auto re-enable
+  if (isDark && !inDarkness) {
+    // Just entered darkness
+    inDarkness = true;
+    darknessStartTime = millis();
+    Serial.print("Entered darkness at light level: ");
+    Serial.println(ldrReading);
+  } else if (!isDark && inDarkness) {
+    // Exited darkness
+    inDarkness = false;
+    Serial.print("Exited darkness at light level: ");
+    Serial.println(ldrReading);
+  }
+  
+  // Auto re-enable LEDs if dark for more than 5 seconds
+  if (inDarkness && !ledsForceEnabled && 
+      (millis() - darknessStartTime) >= darknessReEnableDelay) {
+    ledsForceEnabled = true;
+    Serial.print("Auto re-enabled LEDs after ");
+    Serial.print(darknessReEnableDelay / 1000);
+    Serial.println(" seconds of darkness");
+    markSettingsChanged(); // Save the new state
+  }
+  
+  // Apply hysteresis to prevent flickering for light sensor control
   if (!ledsEnabledByLight && ldrReading < (LDR_THRESHOLD - LDR_HYSTERESIS)) {
-    // It's getting dark enough - enable LEDs
+    // It's getting dark enough - enable LEDs by light sensor
     ledsEnabledByLight = true;
     Serial.print("Light level decreased to ");
     Serial.print(ldrReading);
-    Serial.println(" - LEDs enabled");
+    Serial.println(" - LEDs enabled by light sensor");
   } else if (ledsEnabledByLight && ldrReading > (LDR_THRESHOLD + LDR_HYSTERESIS)) {
-    // It's getting too bright - disable LEDs (unless force enabled)
+    // It's getting too bright - disable LEDs by light sensor (unless force enabled)
     ledsEnabledByLight = false;
     Serial.print("Light level increased to ");
     Serial.print(ldrReading);
@@ -522,7 +560,7 @@ bool shouldShowLEDs() {
     return true;
   }
   
-  // Show LEDs if force enabled (button was pressed recently)
+  // Show LEDs if force enabled (persists until manually changed)
   if (ledsForceEnabled) {
     return true;
   }
@@ -546,7 +584,9 @@ void printPowerStatus() {
   Serial.print("%, Light Level: ");
   Serial.print(lastLDRReading);
   Serial.print(", LEDs: ");
-  Serial.println(shouldShowLEDs() ? "Enabled" : "Disabled");
+  Serial.print(shouldShowLEDs() ? "Enabled" : "Disabled");
+  Serial.print(", Force Enable: ");
+  Serial.println(ledsForceEnabled ? "Yes" : "No");
 }
 
 void checkButtons() {
@@ -559,12 +599,34 @@ void checkButtons() {
   }
 
   if ((millis() - lastDebounceTime) > debounceDelay) {
-    // Button 1 - Change mode/color ONLY (nothing to do with songs)
+    // Button 1 - Change mode/color OR long press for force enable toggle
     if (reading1 != button1State) {
       button1State = reading1;
+      
       if (button1State == LOW) {
-        handleButton1Press();
+        // Button pressed - start timing for long press
+        button1PressStartTime = millis();
+        button1LongPressDetected = false;
+      } else {
+        // Button released
+        unsigned long pressDuration = millis() - button1PressStartTime;
+        
+        if (button1LongPressDetected) {
+          // Long press was already handled, do nothing
+        } else if (pressDuration < longPressTime) {
+          // Short press - normal button function
+          handleButton1Press();
+        }
+        
+        button1LongPressDetected = false;
       }
+    }
+    
+    // Check for long press while button is still held
+    if (button1State == LOW && !button1LongPressDetected && 
+        (millis() - button1PressStartTime) >= longPressTime) {
+      button1LongPressDetected = true;
+      handleButton1LongPress();
     }
 
     // Button 2 - Play/Stop songs
@@ -581,12 +643,12 @@ void checkButtons() {
 }
 
 void handleButton1Press() {
-  // Button 1 ONLY changes LED patterns/colors - has NOTHING to do with songs
-  // Enable LEDs temporarily when button is pressed (even in bright light)
+  // Button 1 SHORT PRESS - changes LED patterns/colors
+  // Enable LEDs when button is pressed (even in bright light) - NO TIMEOUT
   if (!shouldShowLEDs()) {
     ledsForceEnabled = true;
-    forceEnableStartTime = millis();
-    Serial.println("Button 1: Temporarily enabling LEDs");
+    Serial.println("Button 1: Force enabling LEDs (no timeout)");
+    markSettingsChanged();  // Save the force enable state
   }
   
   if (currentMode == STATIC_COLOR) {
@@ -630,6 +692,69 @@ void handleButton1Press() {
   updateDisplay();
   // Mark settings as changed when display mode or color changes
   markSettingsChanged();
+}
+
+void handleButton1LongPress() {
+  // Button 1 LONG PRESS - toggle force enable mode
+  ledsForceEnabled = !ledsForceEnabled;
+  
+  // Reset darkness tracking when manually toggling
+  if (!ledsForceEnabled) {
+    inDarkness = false;  // Reset darkness state when disabling force mode
+  }
+  
+  // Flash LEDs to indicate mode change
+  flashLEDsToIndicateMode();
+  
+  Serial.print("Button 1 LONG PRESS: Force enable mode ");
+  Serial.println(ledsForceEnabled ? "ENABLED (LEDs ignore light sensor)" : "DISABLED (LEDs follow light sensor)");
+  
+  markSettingsChanged();  // Save the new state
+  updateDisplay();
+}
+
+void flashLEDsToIndicateMode() {
+  // Save current LED state
+  CRGB savedLeds[NUM_LEDS];
+  for(int i = 0; i < NUM_LEDS; i++) {
+    savedLeds[i] = leds[i];
+  }
+  
+  // Flash pattern to indicate mode
+  if (ledsForceEnabled) {
+    // Force enabled - flash GREEN (always on)
+    fill_solid(leds, NUM_LEDS, CRGB::Green);
+    FastLED.show();
+    delay(200);
+    turnOffAllLEDs();
+    FastLED.show();
+    delay(100);
+    fill_solid(leds, NUM_LEDS, CRGB::Green);
+    FastLED.show();
+    delay(200);
+    turnOffAllLEDs();
+    FastLED.show();
+    delay(100);
+  } else {
+    // Force disabled - flash RED (light sensor control)
+    fill_solid(leds, NUM_LEDS, CRGB::Red);
+    FastLED.show();
+    delay(200);
+    turnOffAllLEDs();
+    FastLED.show();
+    delay(100);
+    fill_solid(leds, NUM_LEDS, CRGB::Red);
+    FastLED.show();
+    delay(200);
+    turnOffAllLEDs();
+    FastLED.show();
+    delay(100);
+  }
+  
+  // Restore previous LED state
+  for(int i = 0; i < NUM_LEDS; i++) {
+    leds[i] = savedLeds[i];
+  }
 }
 
 void handleButton2Press() {
@@ -880,7 +1005,6 @@ void updatePatterns() {
         case WAVE_MODE:
             patternUpdateInterval = WAVE_SPEED;
             break;
-
         case FADE_RANDOM:
             patternUpdateInterval = FADE_SPEED;
             break;
@@ -914,7 +1038,6 @@ void updatePatterns() {
             case CHASE_MODE:
                 updateChasePattern();
                 break;
-
             case WAVE_MODE:
                 updateWavePattern();
                 break;
@@ -933,7 +1056,6 @@ void updatePatterns() {
             case CANDY_CANE_MODE:
                 updateCandyCanePattern();
                 break;
-
             case OFF_MODE:
                 turnOffAllLEDs();
                 break;
@@ -1168,6 +1290,7 @@ void updateSong() {
     }
   }
 }
+
 // Function to output sensor data every second
 void outputSensorData() {
   // Read current sensor values
@@ -1194,6 +1317,9 @@ void outputSensorData() {
   Serial.print("Battery Voltage: ");
   Serial.print(battVoltage * 2, 2);  // Display actual voltage (after voltage divider)
   Serial.println("V");
+  
+  Serial.print("Force Enable: ");
+  Serial.println(ledsForceEnabled ? "Yes" : "No");
   
   Serial.print("Animation: ");
   // Declare variables outside switch

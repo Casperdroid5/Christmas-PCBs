@@ -87,10 +87,10 @@ The device supports over-the-air (OTA) configuration using a temporary WiFi Acce
 
 1.  On a smartphone or computer, search for the new WiFi network created by the device.
 2.  Connect to the Access Point. The AP name will typically be a unique identifier.
-3.  Once connected, a **captive portal** should open automatically, or you can navigate to `http://192.168.4.1` or `http://christmastree.local` in your browser.
-4.  The web interface will allow you to modify settings stored in the **ESP32 Preferences**.
+3.  Once connected, a **captive portal** should open automatically, or you can navigate to `http://192.168.4.1` in your browser.
+4.  The web interface will allow you to modify settings stored in the **ESP32**.
 
 ### AP Timeout
 
-For security and power-saving, the WiFi Access Point will automatically **turn off after 5 minutes** (300,000 milliseconds) of inactivity. To re-enable it, repeat the two-button press.
+For security and power-saving, the WiFi Access Point will automatically **turn off after 5 minutes** (300,000 milliseconds) of inactivity. To re-enable it, repeat the two-button press. Wifi will only work when connected to a USB power source (not using batteries)
 ````

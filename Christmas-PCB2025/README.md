@@ -1,6 +1,4 @@
-This is the project manual/README file in Markdown format (`.md`).
 
-````markdown
 # 🎄 ESP32-C3 LED & Music Controller
 
 This project provides hardware and firmware for an ESP32-C3 based Christmas-themed PCB that controls an array of addressable LEDs and plays Christmas songs via a buzzer. It includes local controls via two buttons, an automatic 6-hour timer, battery monitoring, and as an extra: a WiFi-based configuration interface.
@@ -93,4 +91,3 @@ The device supports over-the-air (OTA) configuration using a temporary WiFi Acce
 ### AP Timeout
 
 For security and power-saving, the WiFi Access Point will automatically **turn off after 5 minutes** (300,000 milliseconds) of inactivity. To re-enable it, repeat the two-button press. Wifi will only work when connected to a USB power source (not using batteries)
-````

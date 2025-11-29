@@ -78,15 +78,15 @@ The device supports over-the-air (OTA) configuration using a temporary WiFi Acce
 
 ### Entering AP Mode
 
-1.  Press and **hold both Button 1 and Button 2 simultaneously** for approximately one second.
-2.  The device will disable standard WiFi, enable the Access Point, and print a message to the serial console.
+1.  Press and **hold both Button 1 and Button 2 simultaneously** for approximately two seconds.
+2.  The device will enable the Access Point (create a network you can connect to)
 
 ### Web Configuration
 
-1.  On a smartphone or computer, search for the new WiFi network created by the device.
-2.  Connect to the Access Point. The AP name will typically be a unique identifier.
-3.  Once connected, a **captive portal** should open automatically, or you can navigate to `http://192.168.4.1` in your browser.
-4.  The web interface will allow you to modify settings stored in the **ESP32**.
+1.  On a smartphone or computer, search for the new WiFi network created by the device (it will be recognizable by "Kerstbal_NAME".
+2.  Connect to the Access Point (your device will likely complain that there is no wifi connection available, connect anyways).
+3.  Once connected, you can navigate to `http://192.168.4.1` in your browser (like firefox of chrome)
+4.  The web interface will allow you to modify settings stored in the **Christmas card**.
 
 ### AP Timeout
 

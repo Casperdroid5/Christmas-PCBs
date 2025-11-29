@@ -1,5 +1,5 @@
 
-# 🎄 ESP32-C3 LED & Music Controller
+# Christmas ball-card 🎄 
 
 This project provides hardware and firmware for an ESP32-C3 based Christmas-themed PCB that controls an array of addressable LEDs and plays Christmas songs via a buzzer. It includes local controls via two buttons, an automatic 6-hour timer, battery monitoring, and as an extra: a WiFi-based configuration interface.
 
